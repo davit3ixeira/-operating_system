@@ -1,0 +1,633 @@
+Lab 2
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa para somar matrizes de acordo com o seguinte algoritmo:
+o primeiro processo irá criar duas matrizes preenchidas e uma terceira vazia
+em 3 áreas de memória compartilhada. Para cada linha da matriz solução, o
+programa deverá gerar um processo para o seu cálculo.
+
+OBS: implemente as matrizes como vetores de tamanho (linha x coluna) e aloque
+a shared memory para os vetores correspondentes.
+
+Código fonte (ex1.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define LINHAS 3
+#define COLUNAS 3
+#define TAMANHO (LINHAS * COLUNAS)
+
+int main(void){
+    int segmentoA, segmentoB, segmentoC;
+    int *A, *B, *C;
+
+    segmentoA = shmget(IPC_PRIVATE, sizeof(int) * TAMANHO,
+                       IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    segmentoB = shmget(IPC_PRIVATE, sizeof(int) * TAMANHO,
+                       IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    segmentoC = shmget(IPC_PRIVATE, sizeof(int) * TAMANHO,
+                       IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+    if (segmentoA == -1 || segmentoB == -1 || segmentoC == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    A = (int *) shmat(segmentoA, 0, 0);
+    B = (int *) shmat(segmentoB, 0, 0);
+    C = (int *) shmat(segmentoC, 0, 0);
+
+    if (A == (int *) -1 || B == (int *) -1 || C == (int *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    int matrizA[TAMANHO] = {
+        5, 7, 9,
+        6, 3, 6,
+        3, 1, 2
+    };
+
+    int matrizB[TAMANHO] = {
+        5, 3, 0,
+        6, 2, 6,
+        5, 7, 0
+    };
+
+    for (int i = 0; i < TAMANHO; i++) {
+        A[i] = matrizA[i];
+        B[i] = matrizB[i];
+        C[i] = 0;
+    }
+
+    for (int linha = 0; linha < LINHAS; linha++) {
+        int pid = fork();
+
+        if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+
+        if (pid == 0) {
+            int inicio = linha * COLUNAS;
+
+            for (int coluna = 0; coluna < COLUNAS; coluna++) {
+                C[inicio + coluna] =
+                    A[inicio + coluna] + B[inicio + coluna];
+            }
+
+            printf("Filho %d calculou a linha %d\n",
+                   getpid(), linha + 1);
+
+            shmdt(A);
+            shmdt(B);
+            shmdt(C);
+            exit(0);
+        }
+    }
+
+    for (int i = 0; i < LINHAS; i++)
+        wait(NULL);
+
+    printf("Matriz A:\n");
+    for (int i = 0; i < TAMANHO; i++) {
+        printf("%d ", A[i]);
+        if ((i + 1) % COLUNAS == 0)
+            printf("\n");
+    }
+
+    printf("Matriz B:\n");
+    for (int i = 0; i < TAMANHO; i++) {
+        printf("%d ", B[i]);
+        if ((i + 1) % COLUNAS == 0)
+            printf("\n");
+    }
+
+    printf("Matriz resultado:\n");
+    for (int i = 0; i < TAMANHO; i++) {
+        printf("%d ", C[i]);
+        if ((i + 1) % COLUNAS == 0)
+            printf("\n");
+    }
+
+    shmdt(A);
+    shmdt(B);
+    shmdt(C);
+
+    shmctl(segmentoA, IPC_RMID, 0);
+    shmctl(segmentoB, IPC_RMID, 0);
+    shmctl(segmentoC, IPC_RMID, 0);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex1 ex1.c
+./ex1
+
+Saída gerada:
+Filho 1201 calculou a linha 1
+Filho 1202 calculou a linha 2
+Filho 1203 calculou a linha 3
+Matriz A:
+5 7 9
+6 3 6
+3 1 2
+Matriz B:
+5 3 0
+6 2 6
+5 7 0
+Matriz resultado:
+10 10 9
+12 5 12
+8 8 2
+
+Reflexão:
+O processo principal cria
+três regiões de memória compartilhada com shmget(), faz o attach com
+shmat() e utiliza três vetores para representar as matrizes. Depois, é criado
+um processo para cada linha da matriz resultado. Cada filho calcula somente
+a sua linha e grava o resultado na terceira área compartilhada. O pai espera
+os filhos terminarem e então apresenta a matriz resultante.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa que leia uma mensagem do dia do stdin (ou arquivo), crie
+uma memória compartilhada com a chave 8752, salve a mensagem na memória e
+faça um outro programa "cliente" que utilize a mesma chave (8752) e exiba a
+mensagem do dia para o usuário.
+
+Código fonte (servidor.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+#define CHAVE 8752
+#define TAMANHO 1024
+
+int main(void){
+    int segmento;
+    char *mensagem;
+
+    char entrada[TAMANHO];
+
+    printf("Digite a mensagem do dia: ");
+
+    if (fgets(entrada, TAMANHO, stdin) == NULL)
+        return 1;
+
+    entrada[strcspn(entrada, "\n")] = '\0';
+
+    segmento = shmget((key_t) CHAVE, TAMANHO,
+                      IPC_CREAT | S_IRUSR | S_IWUSR);
+
+    if (segmento == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    mensagem = (char *) shmat(segmento, 0, 0);
+
+    if (mensagem == (char *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    snprintf(mensagem, TAMANHO, "%s", entrada);
+
+    printf("Mensagem salva na memoria compartilhada.\n");
+
+    shmdt(mensagem);
+
+    return 0;
+}
+
+Código fonte (cliente.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+#define CHAVE 8752
+#define TAMANHO 1024
+
+int main(void){
+    int segmento;
+    char *mensagem;
+
+    segmento = shmget((key_t) CHAVE, TAMANHO, S_IRUSR | S_IWUSR);
+
+    if (segmento == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    mensagem = (char *) shmat(segmento, 0, 0);
+
+    if (mensagem == (char *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    printf("Mensagem do dia: %s\n", mensagem);
+
+    shmdt(mensagem);
+
+    return 0;
+}
+
+Código fonte (remove.c):
+
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+#define CHAVE 8752
+
+int main(void){
+    int segmento;
+
+    segmento = shmget((key_t) CHAVE, 1, S_IRUSR | S_IWUSR);
+
+    if (segmento == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    if (shmctl(segmento, IPC_RMID, 0) == -1) {
+        perror("shmctl");
+        return 1;
+    }
+
+    printf("Memoria compartilhada removida.\n");
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o servidor servidor.c
+gcc -o cliente cliente.c
+gcc -o remove remove.c
+./servidor
+./cliente
+./remove
+
+Saída gerada:
+Digite a mensagem do dia: Estude memoria compartilhada!
+Mensagem salva na memoria compartilhada.
+Mensagem do dia: Estude memoria compartilhada!
+Memoria compartilhada removida.
+
+Reflexão:
+É determinado o uso da chave 8752 para que os dois programas encontrem
+a mesma área de memória compartilhada. O servidor utiliza shmget() para criar
+o segmento e shmat() para associá-lo ao espaço de endereçamento do processo.
+A mensagem é gravada nessa região. O cliente utiliza a mesma chave, faz o
+attach no segmento já existente e lê a mensagem. Ao final, o segmento pode
+ser removido com shmctl() usando IPC_RMID.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa paralelo (com pelo menos 4 processos) para localizar uma
+chave em um vetor. Crie uma memória compartilhada com dados numéricos
+inteiros e desordenados e a divida pelo número de processos. Cada processo
+deve procurar o dado na sua área de memória e informar a posição onde o dado
+foi localizado.
+
+Código fonte (ex3.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define PROCESSOS 4
+#define TAMANHO 20
+#define CHAVE 42
+
+int main(void){
+    int segmento;
+    int *vetor;
+
+    int dados[TAMANHO] = {
+        13, 7, 25, 9, 31,
+        4, 18, 2, 42, 11,
+        6, 29, 15, 8, 20,
+        3, 27, 14, 35, 10
+    };
+
+    segmento = shmget(IPC_PRIVATE, sizeof(int) * TAMANHO,
+                      IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+    if (segmento == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    vetor = (int *) shmat(segmento, 0, 0);
+
+    if (vetor == (int *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    for (int i = 0; i < TAMANHO; i++)
+        vetor[i] = dados[i];
+
+    int tamanho_bloco = TAMANHO / PROCESSOS;
+
+    for (int processo = 0; processo < PROCESSOS; processo++) {
+        int pid = fork();
+
+        if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+
+        if (pid == 0) {
+            int inicio = processo * tamanho_bloco;
+            int fim = inicio + tamanho_bloco;
+            int encontrou = 0;
+
+            for (int i = inicio; i < fim; i++) {
+                if (vetor[i] == CHAVE) {
+                    printf("Processo %d encontrou a chave %d na posicao %d\n",
+                           getpid(), CHAVE, i);
+                    encontrou = 1;
+                    break;
+                }
+            }
+
+            if (!encontrou) {
+                printf("Processo %d nao encontrou a chave na area %d-%d\n",
+                       getpid(), inicio, fim - 1);
+            }
+
+            shmdt(vetor);
+            exit(0);
+        }
+    }
+
+    for (int i = 0; i < PROCESSOS; i++)
+        wait(NULL);
+
+    shmdt(vetor);
+    shmctl(segmento, IPC_RMID, 0);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex3 ex3.c
+./ex3
+
+Saída gerada:
+Processo 1301 nao encontrou a chave na area 0-4
+Processo 1302 nao encontrou a chave na area 5-9
+Processo 1303 encontrou a chave 42 na posicao 8
+Processo 1304 nao encontrou a chave na area 15-19
+
+Reflexão:
+A solução utiliza quatro processos. O vetor com
+inteiros desordenados é colocado em uma área de memória compartilhada e
+dividido igualmente entre os quatro processos. Cada filho procura a chave
+somente na sua parte do vetor. Quando encontra o valor, informa a posição
+correspondente no vetor. Assim, as buscas são realizadas em paralelo e os
+processos utilizam a mesma região de memória para acessar os dados.
+
+
+EXERCÍCIO 4
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa que tenha um processo pai que abre dois blocos de memória
+compartilhada, m1 e m2. Crie dois processos filho (use exec), P1 e P2, que
+também fazem attach em m1 ou m2 respectivamente. Cada um dá um sleep()
+randômico e escreve um valor int na área compartilhada dele e avisa o
+processo pai que um novo valor foi gerado, escrevendo também um número de
+sequência. O pai fica em loop verificando se houve um novo valor. Apenas
+quando ambos P1 e P2 geraram um novo valor, o pai imprime o produto dos
+valores gerados por P1 e P2.
+
+Código fonte (worker.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <unistd.h>
+#include <time.h>
+
+typedef struct {
+    int valor;
+    int seq;
+} Dados;
+
+int main(int argc, char *argv[]){
+    if (argc != 3) {
+        printf("Uso: %s <shmid> <processo>\n", argv[0]);
+        return 1;
+    }
+
+    int segmento = atoi(argv[1]);
+    int processo = atoi(argv[2]);
+
+    Dados *dados = (Dados *) shmat(segmento, 0, 0);
+
+    if (dados == (Dados *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    srand((unsigned int) (time(NULL) ^ getpid()));
+
+    for (int i = 1; i <= 5; i++) {
+        sleep((rand() % 3) + 1);
+
+        dados->valor = (rand() % 10) + 1;
+        dados->seq = i;
+
+        printf("P%d: valor = %d, seq = %d\n",
+               processo, dados->valor, dados->seq);
+        fflush(stdout);
+    }
+
+    shmdt(dados);
+
+    return 0;
+}
+
+Código fonte (ex4.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+typedef struct {
+    int valor;
+    int seq;
+} Dados;
+
+int main(void){
+    int m1, m2;
+    Dados *p1, *p2;
+
+    m1 = shmget(IPC_PRIVATE, sizeof(Dados),
+                IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+    m2 = shmget(IPC_PRIVATE, sizeof(Dados),
+                IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+    if (m1 == -1 || m2 == -1) {
+        perror("shmget");
+        return 1;
+    }
+
+    p1 = (Dados *) shmat(m1, 0, 0);
+    p2 = (Dados *) shmat(m2, 0, 0);
+
+    if (p1 == (Dados *) -1 || p2 == (Dados *) -1) {
+        perror("shmat");
+        return 1;
+    }
+
+    p1->valor = 0;
+    p1->seq = 0;
+    p2->valor = 0;
+    p2->seq = 0;
+
+    int pid1 = fork();
+
+    if (pid1 < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid1 == 0) {
+        char shm1[20];
+
+        snprintf(shm1, sizeof(shm1), "%d", m1);
+
+        execl("./worker", "worker", shm1, "1", NULL);
+
+        perror("execl");
+        exit(1);
+    }
+
+    int pid2 = fork();
+
+    if (pid2 < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid2 == 0) {
+        char shm2[20];
+
+        snprintf(shm2, sizeof(shm2), "%d", m2);
+
+        execl("./worker", "worker", shm2, "2", NULL);
+
+        perror("execl");
+        exit(1);
+    }
+
+    int seq1 = 0;
+    int seq2 = 0;
+    int valor1 = 0;
+    int valor2 = 0;
+    int novo1 = 0;
+    int novo2 = 0;
+
+    while (seq1 < 5 || seq2 < 5) {
+        if (p1->seq > seq1) {
+            seq1 = p1->seq;
+            valor1 = p1->valor;
+            novo1 = 1;
+        }
+
+        if (p2->seq > seq2) {
+            seq2 = p2->seq;
+            valor2 = p2->valor;
+            novo2 = 1;
+        }
+
+        if (novo1 && novo2) {
+            printf("seq1=%d valor1=%d | seq2=%d valor2=%d | produto=%d\n",
+                   seq1, valor1, seq2, valor2, valor1 * valor2);
+
+            novo1 = 0;
+            novo2 = 0;
+        }
+
+        usleep(100000);
+    }
+
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
+
+    shmdt(p1);
+    shmdt(p2);
+
+    shmctl(m1, IPC_RMID, 0);
+    shmctl(m2, IPC_RMID, 0);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o worker worker.c
+gcc -o ex4 ex4.c
+./ex4
+
+Saída gerada:
+P1: valor = 7, seq = 1
+P2: valor = 4, seq = 1
+seq1=1 valor1=7 | seq2=1 valor2=4 | produto=28
+P2: valor = 9, seq = 2
+P1: valor = 3, seq = 2
+seq1=2 valor1=3 | seq2=2 valor2=9 | produto=27
+P1: valor = 6, seq = 3
+P2: valor = 8, seq = 3
+seq1=3 valor1=6 | seq2=3 valor2=8 | produto=48
+P2: valor = 5, seq = 4
+P1: valor = 2, seq = 4
+seq1=4 valor1=2 | seq2=4 valor2=5 | produto=10
+P1: valor = 9, seq = 5
+P2: valor = 6, seq = 5
+seq1=5 valor1=9 | seq2=5 valor2=6 | produto=54
+
+Reflexão:
+O programa foi estruturado de acordo com a arquitetura mostrada no slide.
+O processo pai cria dois blocos de memória compartilhada, m1 e m2. Em seguida,
+são criados dois processos filhos e cada um executa o programa worker por
+meio de execl(). O filho P1 faz attach em m1 e o filho P2 faz attach em m2.
+
+Cada filho executa um sleep() de duração randômica, gera um valor inteiro e
+grava na sua área compartilhada junto com o número de sequência. O pai fica
+em loop verificando os valores de sequência. Quando existe um novo valor de
+P1 e um novo valor de P2, o pai calcula e imprime o produto, seguindo a
+ideia apresentada no slide de trabalhar com (x, seq1), (y, seq2) e calcular
+res = x * y.

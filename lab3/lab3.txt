@@ -1,0 +1,459 @@
+Lab 3
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Execute o programa "ctrl-c.c". Digite Ctrl-C e Ctrl-\. Analise o resultado.
+Neste mesmo programa, remova os comandos signal() e repita o teste anterior
+observando os resultados.
+
+Código fonte (ctrlc.c):
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define EVER ;;
+
+void intHandler(int sinal);
+void quitHandler(int sinal);
+
+int main (void)
+{
+    void (*p)(int);
+
+    p = signal(SIGINT, intHandler);
+    printf("Endereco do manipulador anterior %p\n", p);
+
+    p = signal(SIGQUIT, quitHandler);
+    printf("Endereco do manipulador anterior %p\n", p);
+
+    puts("Ctrl-C desabilitado. Use Ctrl-\\ para terminar");
+
+    for (EVER) {
+        pause();
+    }
+}
+
+void intHandler(int sinal)
+{
+    printf("Voce pressionou Ctrl-C (%d)\n", sinal);
+    fflush(stdout);
+}
+
+void quitHandler(int sinal)
+{
+    printf("Terminando o processo...\n");
+    exit(0);
+}
+
+OBS: foi adicionado um pause() dentro do for(EVER) para que o processo fique
+efetivamente dormindo entre um sinal e outro (em vez de consumir CPU em um
+laço vazio). O comportamento em relação ao tratamento dos sinais é o mesmo
+do código apresentado no slide.
+
+Linha de comando para compilação e execução:
+gcc -o ctrlc ctrlc.c
+./ctrlc &
+kill -s SIGINT <pid>    (equivalente a apertar Ctrl-C no terminal)
+kill -s SIGINT <pid>
+kill -s SIGQUIT <pid>   (equivalente a apertar Ctrl-\ no terminal)
+
+Saída gerada (com os handlers instalados):
+Endereco do manipulador anterior 0x1
+Endereco do manipulador anterior 0x1
+Ctrl-C desabilitado. Use Ctrl-\ para terminar
+Voce pressionou Ctrl-C (2)
+Voce pressionou Ctrl-C (2)
+Terminando o processo...
+
+Código fonte sem os comandos signal() (ctrlc_sem_signal.c):
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define EVER ;;
+
+int main (void)
+{
+    puts("Tratamento de sinais removido. Ctrl-C e Ctrl-\\ terao a acao default.");
+
+    for (EVER) {
+        pause();
+    }
+}
+
+Linha de comando para compilação e execução:
+gcc -o ctrlc_sem_signal ctrlc_sem_signal.c
+./ctrlc_sem_signal &
+kill -s SIGINT <pid>    (equivalente a Ctrl-C)
+
+Saída gerada (sem os handlers, ação default):
+Tratamento de sinais removido. Ctrl-C e Ctrl-\ terao a acao default.
+[o processo é terminado imediatamente ao receber SIGINT, sem imprimir
+ nenhuma mensagem adicional - a ação default de SIGINT é "Term"]
+
+Reflexão:
+Quando os handlers estão instalados com signal(), o SIGINT (Ctrl-C) deixa de
+ter sua ação default (terminar o processo) e passa a executar intHandler(),
+que apenas imprime uma mensagem e devolve o controle ao ponto onde o
+processo estava (dentro do pause()). Já o SIGQUIT (Ctrl-\) é tratado por
+quitHandler(), que chama exit(0) explicitamente para encerrar o processo -
+por isso só o Ctrl-\ derruba o programa nesse exemplo. O primeiro
+printf("Endereco do manipulador anterior") imprime o endereço do handler
+default (SIG_DFL, valor 0) ou de ignorar (SIG_IGN, valor 1), já que nenhum
+handler havia sido instalado antes.
+Ao remover as chamadas signal(), os sinais voltam a ter sua ação default:
+SIGINT passa a ter ação "Term" (o processo é terminado imediatamente) e
+SIGQUIT passa a ter ação "Core" (o processo é terminado e um arquivo core é
+gerado). Isso confirma o que a tabela do slide descreve: sem um handler ou
+uma chamada explícita para SIG_IGN/SIG_DFL, o kernel aplica a ação padrão de
+cada sinal.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Tente fazer um programa para interceptar o sinal SIGKILL. Você conseguiu?
+Explique.
+
+Código fonte (sigkill_test.c):
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define EVER ;;
+
+void killHandler(int sinal);
+
+int main (void)
+{
+    void (*p)(int);
+
+    p = signal(SIGKILL, killHandler);
+
+    if (p == SIG_ERR) {
+        printf("Nao foi possivel instalar o handler para SIGKILL (SIG_ERR)\n");
+    } else {
+        printf("signal(SIGKILL, killHandler) retornou %p, handler aparentemente instalado\n", p);
+    }
+
+    printf("PID %d aguardando sinais...\n", getpid());
+    fflush(stdout);
+
+    for (EVER) {
+        pause();
+    }
+}
+
+void killHandler(int sinal)
+{
+    printf("SIGKILL interceptado! Isso nunca deveria aparecer.\n");
+    fflush(stdout);
+}
+
+Linha de comando para compilação e execução:
+gcc -o sigkill_test sigkill_test.c
+./sigkill_test &
+kill -s SIGKILL <pid>
+
+Saída gerada:
+Nao foi possivel instalar o handler para SIGKILL (SIG_ERR)
+PID 583 aguardando sinais...
+[o processo é encerrado imediatamente ao receber o SIGKILL, sem nenhuma
+ mensagem adicional]
+
+Reflexão:
+Não é possível interceptar (nem ignorar) o SIGKILL. A própria chamada
+signal(SIGKILL, killHandler) já falha e retorna SIG_ERR, ou seja, o kernel
+recusa instalar qualquer handler para esse sinal. Isso acontece porque
+SIGKILL (assim como SIGSTOP) foi projetado justamente para ser a última
+forma de garantir que o sistema operacional consiga terminar um processo,
+independente do seu estado ou de qualquer tratamento customizado que o
+programador tente instalar - por isso a tabela do slide não lista uma opção
+de "capturar" esses dois sinais. Como resultado, killHandler() nunca é
+executado e o processo morre com a ação default (Term) assim que o kill -9
+é enviado.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Execute e explique o funcionamento de filhocidio.c
+
+Código fonte (filhocidio.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+void childhandler(int signo);
+int delay;
+pid_t pid;
+
+int main (int argc, char *argv[])
+{
+    if (argc < 3) {
+        fprintf(stderr, "Uso: %s tempo programafilho arg1 arg2 ... argn\n", argv[0]);
+        exit(-1);
+    }
+
+    signal(SIGCHLD, childhandler);
+
+    if ((pid = fork()) < 0) {
+        fprintf(stderr, "Erro ao criar filho\n");
+        exit(-1);
+    }
+
+    if (pid == 0) {
+        execv(argv[2], &argv[2]);
+        perror("execv");
+        exit(-1);
+    } else {
+        sscanf(argv[1], "%d", &delay);
+        sleep(delay);
+        printf("Program %s exceeded limit of %d seconds!\n", argv[2], delay);
+        kill(pid, SIGKILL);
+        sleep(1); /* necessario para o SIGCHLD chegar */
+    }
+
+    return 0;
+}
+
+void childhandler(int signo)
+{
+    int status;
+    pid_t filho = wait(&status);
+    printf("Child %d terminated within %d seconds com estado %d.\n", filho, delay, status);
+    exit(0);
+}
+
+Programas auxiliares usados como "filho" (sleep5.c e sleep15.c):
+
+#include <stdio.h>
+#include <unistd.h>
+
+int main (void)
+{
+    fprintf(stdout, "indo dormir...\n");
+    fflush(stdout);
+    sleep(5);
+    fprintf(stdout, "Acordei!\n");
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o filhocidio filhocidio.c
+gcc -o sleep5 sleep5.c
+gcc -o sleep15 sleep15.c
+./filhocidio 10 ./sleep5
+./filhocidio 10 ./sleep15
+
+Saída gerada (teste 1 - filho termina dentro do prazo):
+indo dormir...
+Acordei!
+Child 625 terminated within 10 seconds com estado 0.
+
+Saída gerada (teste 2 - filho excede o prazo):
+indo dormir...
+Program ./sleep15 exceeded limit of 10 seconds!
+Child 627 terminated within 10 seconds com estado 9.
+
+Reflexão:
+O processo pai instala um handler para SIGCHLD (childhandler) antes de criar
+o filho com fork(). Em seguida, o filho substitui sua imagem de memória pelo
+programa indicado na linha de comando usando execv(), enquanto o pai lê o
+tempo limite (delay) e dorme por esse período com sleep(delay).
+Se o filho terminar antes do tempo limite (caso do sleep5, que demora 5s e
+o limite é 10s), o kernel envia SIGCHLD para o pai assim que o filho morre,
+interrompendo o sleep(delay) do pai e disparando childhandler(), que faz
+wait() para coletar o status do filho, imprime a mensagem de término e
+encerra o processo pai com exit(0) - por isso a mensagem "Program ...
+exceeded limit" não chega a ser impressa nesse caso.
+Se o filho demorar mais que o limite (caso do sleep15, que demora 15s contra
+um limite de 10s), o sleep(delay) do pai termina normalmente (sem ser
+interrompido por sinal), o pai imprime a mensagem de estouro de tempo e
+mata o filho com kill(pid, SIGKILL). Esse SIGKILL faz o filho morrer, o que
+gera um novo SIGCHLD; como o pai já está em sleep(1), esse sinal também
+interrompe essa pausa e executa childhandler(), que imprime o status de
+término do filho (nesse caso, código 9, indicando que ele foi finalizado
+pelo sinal SIGKILL) antes do processo pai encerrar.
+
+
+EXERCÍCIO 4
+------------------------------------------------------------------------------
+Enunciado:
+Usando SIGSTOP e SIGCONT faça um programa que crie 2 processos filho e
+alterne a execução dos filhos. Após 10 trocas de contexto, o processo pai
+mata os processos filho.
+OBS: Os processos filho são formados por loops infinitos.
+
+Código fonte (ex4_stopcont.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#define TROCAS 10
+
+void filho(int numero);
+
+int main (void)
+{
+    pid_t pid1, pid2;
+    int ativo;
+
+    pid1 = fork();
+
+    if (pid1 < 0) {
+        perror("fork");
+        exit(1);
+    }
+
+    if (pid1 == 0) {
+        filho(1);
+        exit(0);
+    }
+
+    pid2 = fork();
+
+    if (pid2 < 0) {
+        perror("fork");
+        exit(1);
+    }
+
+    if (pid2 == 0) {
+        filho(2);
+        exit(0);
+    }
+
+    printf("Pai: filho1 (pid %d) e filho2 (pid %d) criados\n", pid1, pid2);
+    fflush(stdout);
+
+    sleep(1);             /* deixa os dois comecarem */
+    kill(pid2, SIGSTOP);  /* apenas filho1 fica ativo no inicio */
+    ativo = 1;
+
+    for (int troca = 1; troca <= TROCAS; troca++) {
+        printf("Pai: troca %d -> ativo = filho%d (pid %d)\n",
+               troca, ativo, (ativo == 1) ? pid1 : pid2);
+        fflush(stdout);
+
+        sleep(1);
+
+        if (troca < TROCAS) {
+            if (ativo == 1) {
+                kill(pid1, SIGSTOP);
+                kill(pid2, SIGCONT);
+                ativo = 2;
+            } else {
+                kill(pid2, SIGSTOP);
+                kill(pid1, SIGCONT);
+                ativo = 1;
+            }
+        }
+    }
+
+    printf("Pai: %d trocas de contexto realizadas. Matando os filhos.\n", TROCAS);
+    fflush(stdout);
+
+    kill(pid1, SIGCONT);
+    kill(pid2, SIGCONT);
+    kill(pid1, SIGKILL);
+    kill(pid2, SIGKILL);
+
+    wait(NULL);
+    wait(NULL);
+
+    printf("Pai: filhos finalizados. Encerrando.\n");
+
+    return 0;
+}
+
+void filho(int numero)
+{
+    long contador = 0;
+
+    for (;;) {
+        contador++;
+        if (contador % 200000000L == 0) {
+            printf("Filho %d (pid %d) esta em execucao... contador=%ld\n",
+                   numero, getpid(), contador);
+            fflush(stdout);
+        }
+    }
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex4_stopcont ex4_stopcont.c
+./ex4_stopcont
+
+Saída gerada:
+Pai: filho1 (pid 646) e filho2 (pid 647) criados
+Filho 1 (pid 646) esta em execucao... contador=200000000
+Filho 2 (pid 647) esta em execucao... contador=200000000
+Pai: troca 1 -> ativo = filho1 (pid 646)
+Filho 1 (pid 646) esta em execucao... contador=400000000
+Filho 1 (pid 646) esta em execucao... contador=600000000
+Pai: troca 2 -> ativo = filho2 (pid 647)
+Filho 2 (pid 647) esta em execucao... contador=400000000
+Filho 2 (pid 647) esta em execucao... contador=600000000
+Pai: troca 3 -> ativo = filho1 (pid 646)
+Filho 1 (pid 646) esta em execucao... contador=800000000
+Filho 1 (pid 646) esta em execucao... contador=1000000000
+Pai: troca 4 -> ativo = filho2 (pid 647)
+Filho 2 (pid 647) esta em execucao... contador=800000000
+Filho 2 (pid 647) esta em execucao... contador=1000000000
+Pai: troca 5 -> ativo = filho1 (pid 646)
+Filho 1 (pid 646) esta em execucao... contador=1200000000
+Filho 1 (pid 646) esta em execucao... contador=1400000000
+Pai: troca 6 -> ativo = filho2 (pid 647)
+Filho 2 (pid 647) esta em execucao... contador=1200000000
+Filho 2 (pid 647) esta em execucao... contador=1400000000
+Pai: troca 7 -> ativo = filho1 (pid 646)
+Filho 1 (pid 646) esta em execucao... contador=1600000000
+Filho 1 (pid 646) esta em execucao... contador=1800000000
+Pai: troca 8 -> ativo = filho2 (pid 647)
+Filho 2 (pid 647) esta em execucao... contador=1600000000
+Filho 2 (pid 647) esta em execucao... contador=1800000000
+Pai: troca 9 -> ativo = filho1 (pid 646)
+Filho 1 (pid 646) esta em execucao... contador=2000000000
+Filho 1 (pid 646) esta em execucao... contador=2200000000
+Filho 1 (pid 646) esta em execucao... contador=2400000000
+Pai: troca 10 -> ativo = filho2 (pid 647)
+Filho 2 (pid 647) esta em execucao... contador=2000000000
+Filho 2 (pid 647) esta em execucao... contador=2200000000
+Filho 2 (pid 647) esta em execucao... contador=2400000000
+Pai: 10 trocas de contexto realizadas. Matando os filhos.
+Pai: filhos finalizados. Encerrando.
+
+Reflexão:
+O processo pai cria dois filhos com fork(), cada um executando um laço
+infinito que apenas incrementa um contador (simulando um processo I/O/CPU
+bound que nunca termina sozinho). Logo depois de criá-los, o pai envia
+SIGSTOP para o filho2, deixando apenas o filho1 em execução. A cada
+iteração do laço de 10 trocas, o pai imprime qual filho está ativo, espera
+1 segundo (tempo em que apenas o filho ativo consegue rodar e incrementar
+seu contador) e então alterna: envia SIGSTOP para o filho que estava
+rodando e SIGCONT para o outro, invertendo o estado dos dois. Isso mostra
+na prática que SIGSTOP interrompe a execução de um processo sem terminá-lo
+(ele fica bloqueado, mas continua existindo na tabela de processos) e que
+SIGCONT devolve esse processo ao estado executável, retomando exatamente
+de onde ele parou. Após as 10 trocas, o pai reenvia SIGCONT para os dois
+filhos (garantindo que nenhum fique parado indefinidamente) e então envia
+SIGKILL para ambos, encerrando-os de vez; por fim, o pai usa wait() duas
+vezes para recolher os processos filhos e evitar que fiquem como zumbis.

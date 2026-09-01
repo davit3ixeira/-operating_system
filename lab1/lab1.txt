@@ -1,0 +1,250 @@
+Lab 1
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa para criar dois processos, o pai escreve seu pid e espera o
+filho terminar e o filho escreve o seu pid e termina.
+
+Código fonte (ex1.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(void){
+    int pid, status;
+    pid = fork();
+    if (pid != 0){
+        printf("%d\n", pid);
+        waitpid(-1, &status, 0);
+    }
+    else {
+        printf("%d\n", pid);
+        exit(1);
+    }
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex1 ex1.c
+./ex1
+
+Saída gerada:
+502
+0
+
+Reflexão:
+O retorno de fork() diferencia pai e filho, no pai ele retorna o pid do
+filho (502 nesta execução), no filho retorna 0. Por isso o pai imprime o
+pid do filho, e o filho sempre imprime 0.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Agora, usando a mesma estrutura de processos pai e filho, declare uma
+variável visível ao pai e ao filho, no pai inicialize a variável com 1 e
+imprima seu valor antes do fork(). No filho, altere o valor da variável
+para 5 e imprima o seu valor antes do exit(). Agora, no pai, imprima
+novamente o valor da variável após o filho ter alterado a variável - após
+a waitpid(). Justifique os resultados obtidos.
+
+Código fonte (ex2.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(void){
+    int pid, status;
+    
+    int var = 1;
+    printf("%d\n", var);
+    pid = fork();
+    if (pid != 0){
+        waitpid(-1, &status, 0);
+        printf("%d\n", var);
+    }
+    else {
+        var = 5;
+        printf("%d\n", var);
+        exit(1);
+    }
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex2 ex2.c
+./ex2
+
+Saída gerada:
+1
+5
+1
+
+Reflexão:
+Após o fork(), pai e filho passam a ter cópias independentes da memória,
+incluindo a variável var. Por isso, quando o filho altera var para 5, essa
+mudança fica restrita a sua própria cópia. O pai, depois do waitpid(),
+ainda vê var = 1, pois nunca teve acesso à alteração feita pelo filho.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Use o programa anterior para ler e ordenar um vetor de 10 posições. O
+filho ordena o vetor e o pai exibe os dados do vetor antes do fork() e
+depois do waitpid(). Eles usarão o mesmo vetor na memória? Justifique.
+
+Código fonte (ex3.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(void){
+    int pid, status;
+    int vetor[] = {2, 5, 6, 1, 9, 0, 3, 7, 4, 8};
+    for(int i = 0; i < 10; i++)
+        printf("%d ", vetor[i]);
+    printf("\n");
+    
+    pid = fork();
+    if (pid != 0){
+        waitpid(-1, &status, 0);
+        for(int i = 0; i < 10; i++)
+            printf("%d ", vetor[i]);
+        printf("\n");
+    }
+    else {
+        for(int i = 0; i < 10; i++){
+            int min = i;
+            for(int j = i; j < 10; j++){
+                if (vetor[j] < vetor[min]){
+                    min = j;
+                }
+            }
+            int a = vetor[i];
+            int b = vetor[min];
+            vetor[i] = b;
+            vetor[min] = a;
+        }
+        for(int i = 0; i < 10; i++)
+            printf("%d ", vetor[i]);
+        printf("\n");
+        exit(1);
+    }
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex3 ex3.c
+./ex3
+
+Saída gerada:
+2 5 6 1 9 0 3 7 4 8 
+0 1 2 3 4 5 6 7 8 9 
+2 5 6 1 9 0 3 7 4 8 
+
+Reflexão:
+Não, pai e filho não compartilham o mesmo vetor na memória. O fork() cria
+o filho com uma cópia do espaço do pai, então cada um passa a ter sua própria cópia do vetor.
+Por isso, quando o filho ordena o vetor, essa
+mudança fica restrita à memória do filho. O pai, depois do waitpid(),
+ainda vê o vetor original desordenado.
+
+
+EXERCÍCIO 4
+------------------------------------------------------------------------------
+Enunciado:
+Modifique o programa anterior para que o filho execute um programa
+elaborado por você, que mande imprimir uma mensagem qualquer no vídeo, por
+exemplo, "alo mundo". Em seguida altere o programa do item 4 para o filho
+executar o programa echo da shell.
+
+Código fonte (alomundo.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+int main(void){
+    printf("alo mundo\n");
+    exit(0);
+}
+
+Código fonte (ex4a.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(void){
+    int pid, status;
+    pid = fork();
+    if (pid != 0){
+        waitpid(-1, &status, 0);
+    }
+    else {
+        execl("./alomundo", "alomundo", NULL);
+        exit(1);
+    }
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o alomundo alomundo.c
+gcc -o ex4a ex4a.c
+./ex4a
+
+Saída gerada:
+alo mundo
+
+Código fonte (ex4b.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(void){
+    int pid, status;
+    pid = fork();
+    if (pid != 0){
+        waitpid(-1, &status, 0);
+    }
+    else {
+        execl("/usr/bin/echo", "echo", "alo", "mundo", NULL);
+        exit(1);
+    }
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -o ex4b ex4b.c
+./ex4b
+
+Saída gerada:
+alo mundo
+
+Reflexão:
+A chamada execl() não cria um processo novo,
+ela substitui o código e os dados do processo que a chamou (no caso, o
+processo filho) pelo código do novo programa informado no primeiro
+argumento, mantendo o mesmo pid. Por isso, o código escrito logo após a
+chamada à execl() só é executado caso a chamada falhe,
+se o exec for bem sucedido, o processo filho vira o novo programa e
+executa a partir do seu main(), nunca retornando ao ponto de onde
+execl() foi chamado. Na Parte 1, o processo filho é substituído pelo
+programa alomundo, que imprime "alo mundo" e termina com exit(0). Na
+Parte 2, o mesmo mecanismo é usado para substituir o filho pelo programa
+echo do sistema, passando "alo" e "mundo" como argumentos.
+Em ambos os casos, o pai continua executando
+normalmente seu próprio código e apenas aguarda o filho terminar através
+de waitpid(), sem qualquer interferência do exec() realizado pelo filho.
