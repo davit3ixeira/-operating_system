@@ -1,0 +1,449 @@
+Lab 4
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa para criar dois processos que se comunicam via pipe. O
+Pai lê do pipe enquanto o filho escreve no pipe. Exiba o resultado do que
+foi escrito e lido.
+
+Código fonte (ex1_pipe_pai_filho.c):
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+int main (void)
+{
+    int fd[2];
+    pid_t pid;
+    char buffer[100];
+    int n;
+
+    if (pipe(fd) < 0) {
+        puts("Erro ao abrir os pipes");
+        exit(-1);
+    }
+
+    pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        exit(-1);
+    }
+
+    if (pid == 0) {
+        close(fd[0]);
+
+        const char *mensagem = "Ola pai, esta mensagem foi escrita pelo filho!";
+        int nEscritos = write(fd[1], mensagem, strlen(mensagem) + 1);
+        printf("Filho (pid %d) escreveu %d bytes no pipe.\n", getpid(), nEscritos);
+
+        close(fd[1]);
+        exit(0);
+    } else {
+        close(fd[1]);
+
+        n = read(fd[0], buffer, sizeof buffer);
+        printf("Pai (pid %d) leu %d bytes do pipe: \"%s\"\n", getpid(), n, buffer);
+
+        close(fd[0]);
+        wait(NULL);
+    }
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex1_pipe_pai_filho ex1_pipe_pai_filho.c
+./ex1_pipe_pai_filho
+
+Saída gerada:
+Filho (pid 96) escreveu 47 bytes no pipe.
+Pai (pid 95) leu 47 bytes do pipe: "Ola pai, esta mensagem foi escrita pelo filho!"
+
+Reflexão:
+O pipe é criado com pipe(fd) antes do fork(), justamente porque, segundo o
+slide, um pipe é um canal de comunicação entre processos "parentes" - ele
+só faz sentido ser compartilhado se os dois descritores (fd[0] de leitura
+e fd[1] de escrita) já existirem na tabela de descritores do processo que
+vai chamar fork(), para que ambos, pai e filho, herdem os mesmos dois
+descritores apontando para o mesmo pipe.
+Seguindo o esquema de comunicação do slide (pai lê, filho escreve), cada
+processo fecha a ponta do pipe que não vai usar: o filho fecha fd[0] (não
+vai ler) e escreve a mensagem em fd[1]; o pai fecha fd[1] (não vai
+escrever) e lê o conteúdo de fd[0]. O fechamento da ponta não usada não é
+apenas boa prática - é o que permite ao leitor eventualmente detectar o
+fim dos dados (EOF), já que, como o slide explica, assim que todos os
+processos fecham (ou terminam) a ponta de escrita, o pipe não tem mais
+como receber novos dados. Como a mensagem enviada é menor que o tamanho
+do buffer de leitura, um único read() já é suficiente para recuperar tudo
+o que foi escrito pelo filho, e a saída confirma que o texto chega
+intacto do processo filho para o processo pai.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa para redirecionar a entrada e a saída, lendo os dados de
+um arquivo e gerando a saída em outro.
+
+Código fonte (ex2_redireciona_io.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <ctype.h>
+
+int main (int argc, char *argv[])
+{
+    int fdIn, fdOut;
+    int c;
+
+    if (argc < 3) {
+        fprintf(stderr, "Uso: %s arquivo_entrada arquivo_saida\n", argv[0]);
+        exit(-1);
+    }
+
+    fdIn = open(argv[1], O_RDONLY);
+    if (fdIn < 0) {
+        perror("Erro ao abrir arquivo de entrada");
+        exit(-1);
+    }
+
+    fdOut = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fdOut < 0) {
+        perror("Erro ao abrir arquivo de saida");
+        exit(-1);
+    }
+
+    if (dup2(fdIn, 0) < 0) {
+        perror("Erro no dup2 de stdin");
+        exit(-1);
+    }
+
+    if (dup2(fdOut, 1) < 0) {
+        perror("Erro no dup2 de stdout");
+        exit(-1);
+    }
+
+    close(fdIn);
+    close(fdOut);
+
+    while ((c = getchar()) != EOF) {
+        putchar(toupper(c));
+    }
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex2_redireciona_io ex2_redireciona_io.c
+printf "ola mundo\neste eh o arquivo de entrada\nlinha final\n" > entrada.txt
+./ex2_redireciona_io entrada.txt saida.txt
+cat saida.txt
+
+Conteúdo de entrada.txt:
+ola mundo
+este eh o arquivo de entrada
+linha final
+
+Saída gerada (conteúdo de saida.txt após a execução):
+OLA MUNDO
+ESTE EH O ARQUIVO DE ENTRADA
+LINHA FINAL
+
+Reflexão:
+O programa abre o arquivo de entrada com open() (somente leitura) e o
+arquivo de saída também com open() (criando-o, ou truncando-o se já
+existir). Em seguida, usa dup2(fdIn, 0) e dup2(fdOut, 1) para substituir
+os descritores padrão 0 (stdin) e 1 (stdout) pelos descritores dos
+arquivos - exatamente o mecanismo descrito no slide de descritores de
+arquivo, em que fd 0, 1 e 2 apontam por padrão para teclado e monitor, mas
+podem ser trocados para permitir outras operações de entrada/saída. Como
+dup2() fecha o descritor de destino antes de duplicar o de origem, o
+antigo stdin/stdout (teclado/monitor) deixa de estar associado a esses
+números e passa a apontar para os arquivos informados.
+A partir do dup2(), qualquer função que opere sobre stdin/stdout (como
+getchar() e putchar(), usadas aqui para converter cada caractere lido em
+maiúsculo com toupper()) passa a ler do arquivo de entrada e escrever no
+arquivo de saída de forma completamente transparente, sem que o restante
+do código precise saber que a entrada/saída não é mais o terminal. Isso
+mostra na prática a ideia central por trás da dup()/dup2(): redirecionar
+E/S é apenas uma questão de manipular a tabela de descritores do
+processo, sem alterar a lógica do programa que os utiliza.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa para criar um pipe e executar dois processos que são
+utilitários do Unix que se comuniquem através do pipe criado, assim como
+a shell faz. Exemplo: endler$ ps | wc
+
+Código fonte (ex3_pipe_utilitarios.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+int main (void)
+{
+    int fd[2];
+    pid_t pid1, pid2;
+
+    if (pipe(fd) < 0) {
+        puts("Erro ao abrir os pipes");
+        exit(-1);
+    }
+
+    pid1 = fork();
+
+    if (pid1 < 0) {
+        perror("fork");
+        exit(-1);
+    }
+
+    if (pid1 == 0) {
+        close(fd[0]);
+        close(1);
+        dup(fd[1]);
+        close(fd[1]);
+
+        execlp("ps", "ps", "-e", NULL);
+        perror("execlp ps");
+        exit(-1);
+    }
+
+    pid2 = fork();
+
+    if (pid2 < 0) {
+        perror("fork");
+        exit(-1);
+    }
+
+    if (pid2 == 0) {
+        close(fd[1]);
+        close(0);
+        dup(fd[0]);
+        close(fd[0]);
+
+        execlp("wc", "wc", "-l", NULL);
+        perror("execlp wc");
+        exit(-1);
+    }
+
+    close(fd[0]);
+    close(fd[1]);
+
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex3_pipe_utilitarios ex3_pipe_utilitarios.c
+./ex3_pipe_utilitarios
+
+Saída gerada:
+52
+
+Saída gerada (comparação executando o equivalente direto na shell,
+logo em seguida):
+$ ps -e | wc -l
+51
+
+Reflexão:
+O programa cria um pipe e depois cria dois processos filhos com fork(). O
+primeiro filho fecha seu stdout (descritor 1) e usa dup(fd[1]) para
+duplicar a ponta de escrita do pipe no lugar do descritor 1 - por isso,
+quando ele chama execlp("ps", "ps", "-e", NULL), o programa ps continua
+escrevendo no que ele acredita ser sua saída padrão, mas na verdade está
+escrevendo no pipe (o mesmo princípio do exemplo de dup()/dup2() do slide,
+em que um programa recém-executado herda os fluxos padrão do processo que
+o chamou). O segundo filho faz o caminho inverso: fecha seu stdin
+(descritor 0) e duplica fd[0] no lugar dele, de modo que, ao executar
+execlp("wc", "wc", "-l", NULL), o utilitário wc lê da entrada padrão sem
+saber que, na realidade, está lendo do pipe. O processo pai apenas fecha
+as duas pontas do pipe (ele não participa da comunicação, só a organiza) e
+espera os dois filhos terminarem - reproduzindo exatamente o que a shell
+faz internamente ao interpretar um comando como "ps -e | wc -l".
+A pequena diferença entre o resultado do programa (52) e o da execução
+direta na shell (51) é esperada e não indica erro: o utilitário ps tira um
+retrato (snapshot) dos processos existentes no exato instante em que é
+executado, e o próprio processo do ps (ou processos efêmeros do shell)
+pode variar de uma chamada para a outra, alterando a contagem final em
+uma ou duas unidades entre execuções sucessivas.
+
+
+EXERCÍCIO 4
+------------------------------------------------------------------------------
+Enunciado:
+Faça um programa que cria dois processos leitores e um processo escritor
+em uma mesma pipe. Faça o escritor dormir metade do tempo dos leitores, e
+mostre como os leitores consomem os dados produzidos pelo escritor.
+Obs: não force uma alternância controlada por SIGSTOP/SIGCONT.
+
+Código fonte (ex4_leitores_escritor.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#define NUM_MSGS 10
+#define TAM_MSG 64
+
+void escritor(int fdEscrita);
+void leitor(int fdLeitura, int numero);
+
+int main (void)
+{
+    int fd[2];
+    pid_t pidEscritor, pidLeitor1, pidLeitor2;
+
+    if (pipe(fd) < 0) {
+        puts("Erro ao abrir os pipes");
+        exit(-1);
+    }
+
+    pidEscritor = fork();
+    if (pidEscritor < 0) {
+        perror("fork");
+        exit(-1);
+    }
+    if (pidEscritor == 0) {
+        close(fd[0]); /* nao le */
+        escritor(fd[1]);
+        close(fd[1]);
+        exit(0);
+    }
+
+    pidLeitor1 = fork();
+    if (pidLeitor1 < 0) {
+        perror("fork");
+        exit(-1);
+    }
+    if (pidLeitor1 == 0) {
+        close(fd[1]);
+        leitor(fd[0], 1);
+        close(fd[0]);
+        exit(0);
+    }
+
+    pidLeitor2 = fork();
+    if (pidLeitor2 < 0) {
+        perror("fork");
+        exit(-1);
+    }
+    if (pidLeitor2 == 0) {
+        close(fd[1]);
+        leitor(fd[0], 2);
+        close(fd[0]);
+        exit(0);
+    }
+
+    close(fd[0]);
+    close(fd[1]);
+
+    waitpid(pidEscritor, NULL, 0);
+    waitpid(pidLeitor1, NULL, 0);
+    waitpid(pidLeitor2, NULL, 0);
+
+    printf("Pai: escritor e os dois leitores terminaram.\n");
+
+    return 0;
+}
+
+void escritor(int fdEscrita)
+{
+    char msg[TAM_MSG];
+
+    for (int i = 1; i <= NUM_MSGS; i++) {
+        snprintf(msg, sizeof msg, "mensagem %d do escritor (pid %d)", i, getpid());
+        write(fdEscrita, msg, sizeof msg);
+        printf("Escritor (pid %d) produziu: \"%s\"\n", getpid(), msg);
+        fflush(stdout);
+        usleep(500000);
+    }
+}
+
+void leitor(int fdLeitura, int numero)
+{
+    char msg[TAM_MSG];
+    int n;
+
+    while ((n = read(fdLeitura, msg, sizeof msg)) > 0) {
+        printf("Leitor %d (pid %d) consumiu: \"%s\"\n", numero, getpid(), msg);
+        fflush(stdout);
+        sleep(1); /* 1s - o dobro do tempo do escritor */
+    }
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex4_leitores_escritor ex4_leitores_escritor.c
+./ex4_leitores_escritor
+
+Saída gerada:
+Escritor (pid 147) produziu: "mensagem 1 do escritor (pid 147)"
+Leitor 1 (pid 148) consumiu: "mensagem 1 do escritor (pid 147)"
+Leitor 2 (pid 149) consumiu: "mensagem 2 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 2 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 3 do escritor (pid 147)"
+Leitor 1 (pid 148) consumiu: "mensagem 3 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 4 do escritor (pid 147)"
+Leitor 2 (pid 149) consumiu: "mensagem 4 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 5 do escritor (pid 147)"
+Leitor 1 (pid 148) consumiu: "mensagem 5 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 6 do escritor (pid 147)"
+Leitor 2 (pid 149) consumiu: "mensagem 6 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 7 do escritor (pid 147)"
+Leitor 1 (pid 148) consumiu: "mensagem 7 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 8 do escritor (pid 147)"
+Leitor 2 (pid 149) consumiu: "mensagem 8 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 9 do escritor (pid 147)"
+Leitor 1 (pid 148) consumiu: "mensagem 9 do escritor (pid 147)"
+Escritor (pid 147) produziu: "mensagem 10 do escritor (pid 147)"
+Leitor 2 (pid 149) consumiu: "mensagem 10 do escritor (pid 147)"
+Pai: escritor e os dois leitores terminaram.
+
+Reflexão:
+Os três processos (um escritor e dois leitores) são criados a partir do
+mesmo pipe, herdado via fork() antes de cada filho fechar a ponta que não
+vai usar - o escritor fecha fd[0] e só escreve em fd[1], e cada leitor
+fecha fd[1] e só lê de fd[0]. Como o slide destaca, uma pipe pode ter
+vários processos leitores e escritores, mas se houver vários leitores o
+escritor não tem como direcionar um dado para um leitor específico: os
+dois leitores competem pelo mesmo fd[0], e cada mensagem escrita pelo
+escritor só pode ser consumida por um dos dois leitores, nunca pelos dois
+(o slide também deixa claro que, uma vez lido, o dado é removido do pipe).
+Cada mensagem tem exatamente TAM_MSG (64) bytes e é escrita com um único
+write(), e cada leitor lê com um único read() de mesmo tamanho, o que
+evita que uma leitura pegue partes de duas mensagens diferentes.
+O escritor dorme 0,5s entre cada escrita, enquanto cada leitor dorme 1s
+entre cada leitura (o dobro, como pedido no enunciado) - mas como os dois
+leitores estão ativos ao mesmo tempo e não há nenhuma alternância forçada
+por SIGSTOP/SIGCONT entre eles, o kernel simplesmente entrega cada nova
+mensagem ao primeiro leitor que estiver bloqueado em read() esperando por
+dado no pipe. Na prática, isso fez os dois leitores se revezarem
+naturalmente consumindo uma mensagem cada, e como a taxa combinada dos
+dois leitores (1 leitura a cada 1s, por leitor, mas dois leitores em
+paralelo) acaba equivalendo aproximadamente à taxa de produção do
+escritor (1 mensagem a cada 0,5s), o consumo acompanha a produção quase
+mensagem a mensagem, sem que o pipe acumule um atraso perceptível entre
+uma execução e outra. Ao final, quando o escritor termina de escrever as
+10 mensagens e fecha fd[1], os leitores recebem EOF (read() retorna 0)
+assim que esvaziam o que sobrou no buffer do pipe, encerrando seus laços
+de leitura sem que seja necessário nenhum sinal explícito de término.
