@@ -1,0 +1,453 @@
+Lab 6
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Abra duas seções de terminais. Na primeira, execute um programa que fica em
+loop lendo de uma FIFO para depois escrever na saída padrão (tela). Na
+segunda, execute um programa que fica lendo da entrada padrão (teclado) e
+depois escreve na mesma FIFO.
+
+Código fonte (ex1_leitor.c) - executado no primeiro terminal:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+#define FIFO "fifo_ex1"
+
+int main (void)
+{
+    char buffer[256];
+    int fd;
+    ssize_t n;
+
+    if (access(FIFO, F_OK) == -1) {
+        if (mkfifo(FIFO, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) != 0) {
+            fprintf(stderr, "Erro ao criar FIFO %s\n", FIFO);
+            exit(-1);
+        }
+    }
+
+    printf("Leitor (pid %d): aguardando escritores na FIFO %s...\n", getpid(), FIFO);
+    fflush(stdout);
+
+    for (;;) {
+        fd = open(FIFO, O_RDONLY);
+        if (fd < 0) {
+            perror("Erro ao abrir a FIFO para leitura");
+            exit(-2);
+        }
+
+        while ((n = read(fd, buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[n] = '\0';
+            fputs(buffer, stdout);
+            fflush(stdout);
+        }
+
+        close(fd);
+    }
+
+    return 0;
+}
+
+Código fonte (ex1_escritor.c) - executado no segundo terminal:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+#define FIFO "fifo_ex1"
+
+int main (void)
+{
+    char linha[256];
+    int fd;
+
+    if (access(FIFO, F_OK) == -1) {
+        if (mkfifo(FIFO, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) != 0) {
+            fprintf(stderr, "Erro ao criar FIFO %s\n", FIFO);
+            exit(-1);
+        }
+    }
+
+    printf("Escritor (pid %d): digite linhas de texto (Ctrl-D para encerrar):\n", getpid());
+    fflush(stdout);
+
+    while (fgets(linha, sizeof(linha), stdin) != NULL) {
+        fd = open(FIFO, O_WRONLY);
+        if (fd < 0) {
+            perror("Erro ao abrir a FIFO para escrita");
+            exit(-2);
+        }
+        write(fd, linha, strlen(linha));
+        close(fd);
+    }
+
+    printf("Escritor: fim da entrada padrao (Ctrl-D recebido).\n");
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex1_leitor ex1_leitor.c
+gcc -Wall -o ex1_escritor ex1_escritor.c
+
+Terminal 1:
+./ex1_leitor
+
+Terminal 2:
+./ex1_escritor
+(digitando "primeira linha", "segunda linha" e "terceira linha", uma por
+ vez, seguidas de Enter, e depois Ctrl-D para encerrar)
+
+Saída gerada (Terminal 2 - escritor):
+Escritor (pid 129): digite linhas de texto (Ctrl-D para encerrar):
+Escritor: fim da entrada padrao (Ctrl-D recebido).
+
+Saída gerada (Terminal 1 - leitor, recebendo cada linha em tempo real):
+Leitor (pid 126): aguardando escritores na FIFO fifo_ex1...
+primeira linha
+segunda linha
+terceira linha
+
+Reflexão:
+O leitor começa criando a FIFO com mkfifo() caso ela ainda não exista (o
+slide reforça que uma FIFO é um tipo especial de arquivo que fica visível
+no sistema de arquivos, diferente do pipe anônimo do Lab 4, que só existe
+enquanto os processos parentes o mantêm aberto). Em seguida, o leitor entra
+em um laço infinito: abre a FIFO para leitura com open(FIFO, O_RDONLY), o
+que bloqueia até que outro processo a abra para escrita, lê tudo o que
+chega até receber EOF (que só acontece quando o outro lado fecha a FIFO) e
+então fecha e volta a abrir, esperando o próximo escritor.
+O escritor, por sua vez, fica em um laço lendo linhas do teclado (stdin)
+com fgets(); a cada linha digitada, ele abre a FIFO para escrita, escreve
+o conteúdo e fecha imediatamente. É justamente esse fechar-e-reabrir a
+cada linha que faz o leitor enxergar um EOF por linha (permitindo que ele
+mostre cada linha assim que ela chega, em vez de esperar o programa
+inteiro terminar) e, ao mesmo tempo, sincroniza os dois processos: como o
+slide explica, o FIFO precisa ser aberto nas duas pontas antes de qualquer
+transmissão de dados, e normalmente a chamada a open() bloqueia até que a
+outra ponta também abra o FIFO - é exatamente esse bloqueio mútuo que
+garante que o leitor só recomece a ler depois que o escritor tiver algo
+novo para mandar. Diferente do pipe anônimo, essa comunicação acontece
+entre dois processos completamente independentes (sem relação de
+parentesco), rodando em terminais diferentes - o que só é possível porque
+a FIFO tem um nome visível no sistema de arquivos, usado por ambos como
+ponto de encontro.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Escreva um programa que primeiro cria uma FIFO e em seguida cria dois
+processos filho que escrevem uma string na FIFO. O pai dá um waitpid em
+seguida lê as strings desse FIFO e exibe na tela.
+
+Código fonte (ex2_fifo_dois_filhos.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#define FIFO "fifo_ex2"
+
+int main (void)
+{
+    int fd;
+    pid_t pid1, pid2;
+    char buffer[256];
+    ssize_t n;
+
+    if (access(FIFO, F_OK) == -1) {
+        if (mkfifo(FIFO, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) != 0) {
+            fprintf(stderr, "Erro ao criar FIFO %s\n", FIFO);
+            exit(-1);
+        }
+    }
+
+    fd = open(FIFO, O_RDWR);
+    if (fd < 0) {
+        perror("Erro ao abrir a FIFO");
+        exit(-2);
+    }
+
+    pid1 = fork();
+    if (pid1 < 0) {
+        perror("fork");
+        exit(-3);
+    }
+    if (pid1 == 0) {
+        char msg[100];
+        int fdEscrita = open(FIFO, O_WRONLY);
+        snprintf(msg, sizeof msg, "Mensagem do filho 1 (pid %d)\n", getpid());
+        write(fdEscrita, msg, strlen(msg));
+        close(fdEscrita);
+        exit(0);
+    }
+
+    pid2 = fork();
+    if (pid2 < 0) {
+        perror("fork");
+        exit(-3);
+    }
+    if (pid2 == 0) {
+        char msg[100];
+        int fdEscrita = open(FIFO, O_WRONLY);
+        snprintf(msg, sizeof msg, "Mensagem do filho 2 (pid %d)\n", getpid());
+        write(fdEscrita, msg, strlen(msg));
+        close(fdEscrita);
+        exit(0);
+    }
+
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
+
+    n = read(fd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Pai: leu %zd bytes da FIFO:\n%s", n, buffer);
+
+    close(fd);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex2_fifo_dois_filhos ex2_fifo_dois_filhos.c
+./ex2_fifo_dois_filhos
+
+Saída gerada (execução 1):
+Pai: leu 60 bytes da FIFO:
+Mensagem do filho 1 (pid 150)
+Mensagem do filho 2 (pid 151)
+
+Saída gerada (execução 2, repetida para confirmar o comportamento):
+Pai: leu 60 bytes da FIFO:
+Mensagem do filho 1 (pid 154)
+Mensagem do filho 2 (pid 155)
+
+Reflexão:
+O ponto mais delicado deste exercício é a ordem em que o pai chama
+waitpid() ANTES de ler a FIFO, como pede o enunciado. Se o pai apenas
+criasse a FIFO e ficasse esperando os filhos terminarem sem nunca abrir a
+FIFO para leitura, haveria um deadlock: o slide explica que, por padrão,
+open() para escrita bloqueia até que a FIFO seja aberta para leitura por
+algum processo - ou seja, os dois filhos ficariam parados em open(FIFO,
+O_WRONLY) esperando um leitor, enquanto o pai ficaria parado em waitpid()
+esperando os filhos terminarem, e nenhum dos três avançaria.
+A solução usada aqui foi o pai abrir a FIFO em modo O_RDWR (leitura e
+escrita) antes de fazer os fork()'s. Como o pai passa a manter uma ponta
+de leitura sempre aberta, o requisito de "abrir nas duas pontas antes de
+transmitir dados" já fica satisfeito assim que qualquer filho abre a FIFO
+para escrita - o open(FIFO, O_WRONLY) de cada filho retorna imediatamente,
+sem bloquear. Isso permite que os dois filhos escrevam suas mensagens e
+terminem rapidamente, o waitpid() do pai retorne sem deadlock, e só depois
+o pai leia (com um único read()) tudo o que os filhos deixaram no buffer
+do FIFO alocado no núcleo - como o slide destaca, essa troca de dados
+acontece por um buffer no núcleo, sem escrita no sistema de arquivos, por
+isso os 60 bytes das duas mensagens continuam disponíveis mesmo depois que
+os filhos já terminaram e fecharam suas próprias pontas de escrita.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Escreva um servidor e um cliente usando duas FIFOs: uma para enviar
+strings para o servidor, e outra para transmitir as respostas de volta
+para os clientes. O servidor deverá rodar em background e transformar
+cada palavra recebida de minúsculas para maiúsculas. Obs: execute os seus
+clientes em terminais diferentes.
+
+Código fonte (ex3_servidor.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+#define FIFO_REQ  "fifo_pedidos"
+#define FIFO_RESP "fifo_respostas"
+
+int main (void)
+{
+    char buffer[256];
+    int fdReq, fdResp;
+    ssize_t n, total;
+
+    if (access(FIFO_REQ, F_OK) == -1) {
+        if (mkfifo(FIFO_REQ, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) != 0) {
+            fprintf(stderr, "Erro ao criar FIFO %s\n", FIFO_REQ);
+            exit(-1);
+        }
+    }
+    if (access(FIFO_RESP, F_OK) == -1) {
+        if (mkfifo(FIFO_RESP, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) != 0) {
+            fprintf(stderr, "Erro ao criar FIFO %s\n", FIFO_RESP);
+            exit(-1);
+        }
+    }
+
+    printf("Servidor (pid %d): aguardando clientes...\n", getpid());
+    fflush(stdout);
+
+    for (;;) {
+        fdReq = open(FIFO_REQ, O_RDONLY);
+        if (fdReq < 0) {
+            perror("Erro ao abrir FIFO de pedidos");
+            exit(-2);
+        }
+
+        total = 0;
+        while ((n = read(fdReq, buffer + total, sizeof(buffer) - 1 - total)) > 0) {
+            total += n;
+        }
+        buffer[total] = '\0';
+        close(fdReq);
+
+        if (total == 0) {
+            continue;
+        }
+
+        if (buffer[total - 1] == '\n') {
+            buffer[total - 1] = '\0';
+        }
+
+        printf("Servidor: recebeu \"%s\", convertendo para maiusculas...\n", buffer);
+        fflush(stdout);
+
+        for (int i = 0; buffer[i]; i++) {
+            buffer[i] = toupper((unsigned char) buffer[i]);
+        }
+        strcat(buffer, "\n");
+
+        fdResp = open(FIFO_RESP, O_WRONLY);
+        if (fdResp < 0) {
+            perror("Erro ao abrir FIFO de respostas");
+            continue;
+        }
+        write(fdResp, buffer, strlen(buffer));
+        close(fdResp);
+    }
+
+    return 0;
+}
+
+Código fonte (ex3_cliente.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#define FIFO_REQ  "fifo_pedidos"
+#define FIFO_RESP "fifo_respostas"
+
+int main (int argc, char *argv[])
+{
+    int fdReq, fdResp;
+    char buffer[256];
+    ssize_t n;
+
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s palavra\n", argv[0]);
+        exit(-1);
+    }
+
+    fdReq = open(FIFO_REQ, O_WRONLY);
+    if (fdReq < 0) {
+        perror("Erro ao abrir FIFO de pedidos");
+        exit(-2);
+    }
+    write(fdReq, argv[1], strlen(argv[1]));
+    close(fdReq);
+
+    fdResp = open(FIFO_RESP, O_RDONLY);
+    if (fdResp < 0) {
+        perror("Erro ao abrir FIFO de respostas");
+        exit(-3);
+    }
+    n = read(fdResp, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    close(fdResp);
+
+    printf("Cliente (pid %d): \"%s\" -> %s", getpid(), argv[1], buffer);
+
+    return 0;
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex3_servidor ex3_servidor.c
+gcc -Wall -o ex3_cliente ex3_cliente.c
+
+Terminal 1 (servidor em background):
+./ex3_servidor &
+
+Terminal 2 (cliente A):
+./ex3_cliente banana
+
+Terminal 3 (cliente B):
+./ex3_cliente abacaxi
+
+Terminal 4 (cliente C):
+./ex3_cliente "sistemas operacionais"
+
+Saída gerada (Terminal 1 - log do servidor):
+Servidor (pid 185): aguardando clientes...
+Servidor: recebeu "banana", convertendo para maiusculas...
+Servidor: recebeu "abacaxi", convertendo para maiusculas...
+Servidor: recebeu "sistemas operacionais", convertendo para maiusculas...
+
+Saída gerada (clientes, cada um em seu terminal):
+Cliente (pid 187): "banana" -> BANANA
+Cliente (pid 188): "abacaxi" -> ABACAXI
+Cliente (pid 189): "sistemas operacionais" -> SISTEMAS OPERACIONAIS
+
+Reflexão:
+O servidor cria as duas FIFOs (fifo_pedidos e fifo_respostas) e roda em
+background em um laço infinito, exatamente como pedido no enunciado. A
+cada iteração, ele abre fifo_pedidos para leitura - isso bloqueia o
+servidor até que um cliente abra a mesma FIFO para escrita, como descrito
+no slide sobre a necessidade de as duas pontas estarem abertas antes da
+transmissão. O servidor lê a palavra inteira (até o cliente fechar sua
+ponta de escrita, gerando EOF), converte cada caractere para maiúsculo com
+toupper() e então abre fifo_respostas para escrita - o que, por sua vez,
+bloqueia até que o cliente abra essa segunda FIFO para leitura.
+Do lado do cliente, o fluxo é sequencial e espelha exatamente o que o
+servidor espera: primeiro abre fifo_pedidos para escrita (o que só
+destrava quando o servidor estiver com fifo_pedidos aberta para leitura),
+escreve a palavra recebida por argumento e fecha; só depois abre
+fifo_respostas para leitura e aguarda a resposta do servidor. Usar duas
+FIFOs separadas (uma só de ida e outra só de volta) segue exatamente a
+recomendação do slide de que um programa não deve abrir a mesma FIFO para
+leitura e escrita ao mesmo tempo, e que, havendo necessidade de
+comunicação nos dois sentidos, o correto é usar duas FIFOs distintas, uma
+para cada direção.
+Como as três chamadas ao cliente (banana, abacaxi e "sistemas
+operacionais") foram feitas em sequência, o log do servidor mostra
+claramente as três interações sendo atendidas uma de cada vez, na ordem
+em que os clientes conseguiram abrir fifo_pedidos - o que é esperado, já
+que com uma única FIFO de pedidos compartilhada, o servidor só processa
+um cliente por vez; se dois clientes tentassem escrever exatamente ao
+mesmo tempo, a ordem de atendimento dependeria de qual deles conseguisse
+abrir a FIFO primeiro, mas a resposta de cada cliente continuaria correta
+e isolada, pois cada ciclo de pedido-resposta é sempre concluído (abrir,
+escrever/ler, fechar as duas FIFOs) antes do servidor voltar a aceitar um
+novo pedido.
