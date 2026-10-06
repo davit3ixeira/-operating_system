@@ -1,0 +1,1005 @@
+Lab 5
+Nome: Davi Teixeira
+Matrícula: 2510420
+
+
+EXERCÍCIO 1
+------------------------------------------------------------------------------
+Enunciado:
+Execute o programa Corrida de Sapo algumas vezes e analise os resultados
+sobre a ordem de chegada dos sapos. Obs: compile com a opção -lpthread
+
+Código fonte (ex1_corrida_sapos.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#define NUM_THREADS 5
+#define PULO_MAXIMO 100
+#define DESCANSO_MAXIMO 1
+#define DISTANCIA_PARA_CORRER 100
+
+static int classificacao = 1;
+static int cont = 0;
+
+void *Correr(void *sapo);
+
+int main (void)
+{
+    pthread_t threads[NUM_THREADS];
+    int t;
+
+    classificacao = 1;
+    printf("Corrida iniciada ... \n");
+
+    for (t = 0; t < NUM_THREADS; t++)
+        pthread_create(&threads[t], NULL, Correr, (void *)(intptr_t) t);
+
+    for (t = 0; t < NUM_THREADS; t++)
+        pthread_join(threads[t], NULL);
+
+    printf("\n Acabou!! (cont = %d)\n", cont);
+    pthread_exit(NULL);
+}
+
+void *Correr(void *sapo)
+{
+    int pulos = 0;
+    int distanciaJaCorrida = 0;
+
+    while (distanciaJaCorrida <= DISTANCIA_PARA_CORRER) {
+        int pulo = rand() % PULO_MAXIMO;
+        distanciaJaCorrida += pulo;
+        pulos++;
+        printf("Sapo %d pulou\n", (int)(intptr_t) sapo);
+        int descanso = rand() % DESCANSO_MAXIMO;
+        sleep(descanso);
+    }
+
+    printf("Sapo %d chegou na posicao %d com %d pulos\n", (int)(intptr_t) sapo, classificacao, pulos);
+    cont++;
+    classificacao++;
+    pthread_exit(NULL);
+}
+
+OBS: o código segue o programa do slide, com três ajustes mínimos: foram
+adicionados os #include necessários, o argumento da thread é convertido
+com intptr_t (evita avisos de compilação em 64 bits) e a mensagem final
+passa a imprimir também o valor de cont, para que seja possível conferir
+se alguma atualização foi perdida.
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex1_corrida_sapos ex1_corrida_sapos.c -lpthread
+./ex1_corrida_sapos
+
+Saída gerada (execução 1, completa):
+Corrida iniciada ... 
+Sapo 0 pulou
+Sapo 1 pulou
+Sapo 0 pulou
+Sapo 3 pulou
+Sapo 0 chegou na posicao 1 com 2 pulos
+Sapo 3 pulou
+Sapo 2 pulou
+Sapo 1 pulou
+Sapo 4 pulou
+Sapo 2 pulou
+Sapo 1 chegou na posicao 2 com 2 pulos
+Sapo 3 chegou na posicao 3 com 2 pulos
+Sapo 2 chegou na posicao 4 com 2 pulos
+Sapo 4 pulou
+Sapo 4 chegou na posicao 5 com 2 pulos
+
+ Acabou!! (cont = 5)
+
+Saída gerada (execução 2, apenas as linhas de chegada):
+Sapo 0 chegou na posicao 1 com 2 pulos
+Sapo 1 chegou na posicao 2 com 2 pulos
+Sapo 3 chegou na posicao 3 com 2 pulos
+Sapo 4 chegou na posicao 4 com 3 pulos
+Sapo 2 chegou na posicao 5 com 3 pulos
+
+Saída gerada (execução 3, apenas as linhas de chegada):
+Sapo 0 chegou na posicao 1 com 2 pulos
+Sapo 1 chegou na posicao 2 com 2 pulos
+Sapo 2 chegou na posicao 3 com 2 pulos
+Sapo 3 chegou na posicao 4 com 2 pulos
+Sapo 4 chegou na posicao 5 com 2 pulos
+
+Saída gerada (resumo de 5000 execuções seguidas, contadas por script):
+Ordens de chegada diferentes encontradas: 51
+Ordem mais frequente (0 1 2 3 4, a mesma da criação das threads): 1385
+vezes
+Execuções com posições fora de 1..5 (repetidas ou faltando): 3
+Execuções com cont diferente de 5: 0
+
+Saída gerada (uma das execuções com posição repetida, capturada pelo
+script):
+Corrida iniciada ... 
+Sapo 0 pulou
+Sapo 1 pulou
+Sapo 0 pulou
+Sapo 0 chegou na posicao 1 com 2 pulos
+Sapo 2 pulou
+Sapo 1 pulou
+Sapo 2 pulou
+Sapo 3 pulou
+Sapo 1 chegou na posicao 2 com 2 pulos
+Sapo 2 chegou na posicao 2 com 2 pulos
+Sapo 3 pulou
+Sapo 4 pulou
+Sapo 3 chegou na posicao 4 com 2 pulos
+Sapo 4 pulou
+Sapo 4 chegou na posicao 5 com 2 pulos
+
+ Acabou!! (cont = 5)
+
+Reflexão:
+O programa cria 5 threads com pthread_create(), uma por sapo, todas
+executando a função Correr(); o número do sapo é passado como argumento
+(convertido para void *). A thread principal espera as cinco terminarem
+com pthread_join() antes de imprimir "Acabou!!". Cada sapo dá pulos
+aleatórios de até 100 unidades até ultrapassar a distância da corrida e,
+ao chegar, lê a variável global classificacao para anunciar sua posição e
+depois incrementa classificacao e cont.
+Analisando as execuções, a primeira conclusão é que a ordem de chegada não
+é fixa: nas 5000 execuções apareceram 51 ordens diferentes. A ordem de
+criação das threads (0 1 2 3 4) foi a mais comum, mas esteve longe de ser
+a única. Isso acontece porque quem decide quando cada thread executa é o
+escalonador do sistema operacional, e o programa não impõe nenhuma ordem
+entre elas. Vale notar que DESCANSO_MAXIMO vale 1, então
+rand() % DESCANSO_MAXIMO é sempre 0 e o sleep(0) nunca realmente dorme:
+os sapos só se alternam quando o escalonador interrompe uma thread no meio
+da corrida.
+O segundo ponto, e o problema que o exercício 2 pede para corrigir, é que
+classificacao e cont são variáveis compartilhadas modificadas sem nenhuma
+proteção. A leitura de classificacao (no printf) e o classificacao++ são
+passos separados, e o próprio ++ é uma sequência de carregar, somar e
+gravar. Se uma thread for interrompida depois de ler o valor e antes de
+incrementá-lo, outra thread pode ler o mesmo valor. Foi o que aconteceu na
+execução capturada: os sapos 1 e 2 anunciaram a posição 2 e a posição 3
+ficou sem ninguém. Esse erro é uma condição de corrida (race condition) e
+apareceu em apenas 3 das 5000 execuções, pois a janela de tempo em que ele
+pode acontecer é minúscula (o teste foi feito em uma máquina com um único
+núcleo, e ainda assim ocorreu). Ou seja, o programa parece correto na
+imensa maioria das vezes, e é exatamente isso que torna esse tipo de bug
+perigoso: ele é raro e não reproduzível sob demanda. A variável cont tem o
+mesmo tipo de problema, mas em nenhuma das execuções observadas ela
+terminou com valor diferente de 5.
+
+
+EXERCÍCIO 2
+------------------------------------------------------------------------------
+Enunciado:
+Usando mutex, modifique o programa Corrida de Sapo para que o problema
+identificado anteriormente não ocorra.
+
+Código fonte (ex2_corrida_sapos_mutex.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#define NUM_THREADS 5
+#define PULO_MAXIMO 100
+#define DESCANSO_MAXIMO 1
+#define DISTANCIA_PARA_CORRER 100
+
+static int classificacao = 1;
+static int cont = 0;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+void *Correr(void *sapo);
+
+int main (void)
+{
+    pthread_t threads[NUM_THREADS];
+    int t;
+
+    classificacao = 1;
+    printf("Corrida iniciada ... \n");
+
+    for (t = 0; t < NUM_THREADS; t++)
+        pthread_create(&threads[t], NULL, Correr, (void *)(intptr_t) t);
+
+    for (t = 0; t < NUM_THREADS; t++)
+        pthread_join(threads[t], NULL);
+
+    printf("\n Acabou!! (cont = %d)\n", cont);
+    pthread_mutex_destroy(&lock);
+    pthread_exit(NULL);
+}
+
+void *Correr(void *sapo)
+{
+    int pulos = 0;
+    int distanciaJaCorrida = 0;
+
+    while (distanciaJaCorrida <= DISTANCIA_PARA_CORRER) {
+        int pulo = rand() % PULO_MAXIMO;
+        distanciaJaCorrida += pulo;
+        pulos++;
+        printf("Sapo %d pulou\n", (int)(intptr_t) sapo);
+        int descanso = rand() % DESCANSO_MAXIMO;
+        sleep(descanso);
+    }
+
+    pthread_mutex_lock(&lock);
+    printf("Sapo %d chegou na posicao %d com %d pulos\n", (int)(intptr_t) sapo, classificacao, pulos);
+    cont++;
+    classificacao++;
+    pthread_mutex_unlock(&lock);
+
+    pthread_exit(NULL);
+}
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex2_corrida_sapos_mutex ex2_corrida_sapos_mutex.c -lpthread
+./ex2_corrida_sapos_mutex
+
+Saída gerada (execução 1, completa):
+Corrida iniciada ... 
+Sapo 0 pulou
+Sapo 1 pulou
+Sapo 2 pulou
+Sapo 3 pulou
+Sapo 4 pulou
+Sapo 4 pulou
+Sapo 3 pulou
+Sapo 2 pulou
+Sapo 1 pulou
+Sapo 0 pulou
+Sapo 1 chegou na posicao 1 com 2 pulos
+Sapo 3 chegou na posicao 2 com 2 pulos
+Sapo 0 chegou na posicao 3 com 2 pulos
+Sapo 2 chegou na posicao 4 com 2 pulos
+Sapo 4 chegou na posicao 5 com 2 pulos
+
+ Acabou!! (cont = 5)
+
+Saída gerada (execução 2, apenas as linhas de chegada):
+Sapo 0 chegou na posicao 1 com 2 pulos
+Sapo 1 chegou na posicao 2 com 2 pulos
+Sapo 2 chegou na posicao 3 com 2 pulos
+Sapo 4 chegou na posicao 4 com 2 pulos
+Sapo 3 chegou na posicao 5 com 2 pulos
+
+Saída gerada (resumo de 10000 execuções seguidas, contadas por script):
+Ordens de chegada diferentes encontradas: 60
+Execuções com posições fora de 1..5 (repetidas ou faltando): 0
+Execuções com cont diferente de 5: 0
+
+Reflexão:
+O trecho problemático do exercício 1 é aquele em que o sapo lê
+classificacao, anuncia a posição e incrementa classificacao e cont. Esse
+trecho é a região crítica: precisa ser executado por uma thread de cada
+vez, sem que outra enxergue o valor "no meio" da atualização. Para isso
+foi criado o mutex lock, inicializado estaticamente com
+PTHREAD_MUTEX_INITIALIZER (a declaração do slide, sem inicialização,
+deixaria o mutex em estado indefinido), e o trecho passou a ficar entre
+pthread_mutex_lock() e pthread_mutex_unlock(). O printf da chegada foi
+mantido dentro da região crítica de propósito: assim o número impresso é
+exatamente a posição que aquela thread reservou, e as linhas de chegada
+saem sempre na ordem 1, 2, 3, 4, 5.
+O mutex protege apenas o trecho curto da chegada. O laço de pulos continua
+fora do lock, então os sapos continuam correndo de forma concorrente; se o
+lock envolvesse a corrida inteira, as threads passariam a executar uma
+depois da outra e a concorrência seria perdida.
+Nas 10000 execuções não houve nenhuma posição repetida ou faltando e cont
+terminou sempre com 5, contra 3 execuções com posição errada em 5000 sem o
+mutex. Um teste por repetição não prova a ausência de erro, mas aqui o
+resultado é o esperado: com o mutex a exclusão mútua é garantida pela
+construção do programa, e não depende da sorte do escalonamento. A ordem
+de chegada continua variando (60 ordens diferentes), o que é correto: o
+mutex não torna a corrida determinística, apenas garante que a
+classificação anunciada seja consistente com a ordem em que os sapos de
+fato passaram pela região crítica.
+
+
+EXERCÍCIO 3
+------------------------------------------------------------------------------
+Enunciado:
+Usando threads, escreva um programa C que implemente o problema do
+produtor/consumidor. O produtor deve produzir dados (números inteiros
+pseudo-aleatórios) a cada 1 segundo colocando-os em uma fila (buffer,
+implementação circular). O consumidor deve retirar dados da fila a cada 2
+segundos. O tamanho máximo da fila deve ser de 8 elementos (MAXFILA) e
+tanto o produtor como o consumidor devem produzir/consumir 64 elementos
+(números inteiros de 1 a 64, por exemplo) evitando condições de corrida.
+Variáveis compartilhadas entre threads são simplesmente variáveis globais.
+
+Código fonte (ex3_produtor_consumidor.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#define MAXFILA 8
+#define TOTAL 64
+
+static int fila[MAXFILA];
+static int entra = 0;
+static int sai = 0;
+static int tamanho = 0;
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t can_produce = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t can_consume = PTHREAD_COND_INITIALIZER;
+
+void *produtor(void *arg);
+void *consumidor(void *arg);
+
+int main (void)
+{
+    pthread_t tProdutor, tConsumidor;
+
+    pthread_create(&tProdutor, NULL, produtor, NULL);
+    pthread_create(&tConsumidor, NULL, consumidor, NULL);
+
+    pthread_join(tProdutor, NULL);
+    pthread_join(tConsumidor, NULL);
+
+    printf("Fim: %d itens produzidos e consumidos, fila final com %d elemento(s).\n", TOTAL, tamanho);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&can_produce);
+    pthread_cond_destroy(&can_consume);
+
+    return 0;
+}
+
+void *produtor(void *arg)
+{
+    unsigned int seed = (unsigned int) time(NULL);
+
+    for (int i = 1; i <= TOTAL; i++) {
+        int valor = rand_r(&seed) % 100 + 1;
+
+        pthread_mutex_lock(&mutex);
+        while (tamanho == MAXFILA) {
+            printf("Produtor: fila cheia (%d/%d), esperando...\n", tamanho, MAXFILA);
+            fflush(stdout);
+            pthread_cond_wait(&can_produce, &mutex);
+        }
+
+        fila[entra] = valor;
+        entra = (entra + 1) % MAXFILA;
+        tamanho++;
+        printf("Produtor: produziu %3d (item %2d) | fila: %d/%d\n", valor, i, tamanho, MAXFILA);
+        fflush(stdout);
+
+        pthread_cond_signal(&can_consume);
+        pthread_mutex_unlock(&mutex);
+
+        sleep(1);
+    }
+
+    return NULL;
+}
+
+void *consumidor(void *arg)
+{
+    for (int i = 1; i <= TOTAL; i++) {
+        pthread_mutex_lock(&mutex);
+        while (tamanho == 0) {
+            printf("Consumidor: fila vazia, esperando...\n");
+            fflush(stdout);
+            pthread_cond_wait(&can_consume, &mutex);
+        }
+
+        int valor = fila[sai];
+        sai = (sai + 1) % MAXFILA;
+        tamanho--;
+        printf("Consumidor: consumiu %3d (item %2d) | fila: %d/%d\n", valor, i, tamanho, MAXFILA);
+        fflush(stdout);
+
+        pthread_cond_signal(&can_produce);
+        pthread_mutex_unlock(&mutex);
+
+        if (i < TOTAL)
+            sleep(2);
+    }
+
+    return NULL;
+}
+
+OBS: os valores produzidos são inteiros pseudo-aleatórios entre 1 e 100
+(rand_r com semente baseada no horário), e não a sequência de 1 a 64
+sugerida como exemplo no enunciado; o número do item (1 a 64) aparece em
+cada linha da saída. O sleep() de cada thread fica fora da região
+crítica, para que uma thread dormindo não segure o mutex. O consumidor não
+dorme depois do último item.
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex3_produtor_consumidor ex3_produtor_consumidor.c -lpthread
+./ex3_produtor_consumidor
+
+Saída gerada (execução completa, dura pouco mais de 2 minutos):
+Produtor: produziu  80 (item  1) | fila: 1/8
+Consumidor: consumiu  80 (item  1) | fila: 0/8
+Produtor: produziu  17 (item  2) | fila: 1/8
+Consumidor: consumiu  17 (item  2) | fila: 0/8
+Produtor: produziu  85 (item  3) | fila: 1/8
+Produtor: produziu  82 (item  4) | fila: 2/8
+Consumidor: consumiu  85 (item  3) | fila: 1/8
+Produtor: produziu   6 (item  5) | fila: 2/8
+Produtor: produziu  13 (item  6) | fila: 3/8
+Consumidor: consumiu  82 (item  4) | fila: 2/8
+Produtor: produziu  66 (item  7) | fila: 3/8
+Produtor: produziu  22 (item  8) | fila: 4/8
+Consumidor: consumiu   6 (item  5) | fila: 3/8
+Produtor: produziu  57 (item  9) | fila: 4/8
+Produtor: produziu  71 (item 10) | fila: 5/8
+Consumidor: consumiu  13 (item  6) | fila: 4/8
+Produtor: produziu  11 (item 11) | fila: 5/8
+Produtor: produziu  56 (item 12) | fila: 6/8
+Consumidor: consumiu  66 (item  7) | fila: 5/8
+Produtor: produziu  57 (item 13) | fila: 6/8
+Produtor: produziu  64 (item 14) | fila: 7/8
+Consumidor: consumiu  22 (item  8) | fila: 6/8
+Produtor: produziu  17 (item 15) | fila: 7/8
+Produtor: produziu  65 (item 16) | fila: 8/8
+Consumidor: consumiu  57 (item  9) | fila: 7/8
+Produtor: produziu  23 (item 17) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  71 (item 10) | fila: 7/8
+Produtor: produziu 100 (item 18) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  11 (item 11) | fila: 7/8
+Produtor: produziu   2 (item 19) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  56 (item 12) | fila: 7/8
+Produtor: produziu  65 (item 20) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  57 (item 13) | fila: 7/8
+Produtor: produziu  97 (item 21) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  64 (item 14) | fila: 7/8
+Produtor: produziu  12 (item 22) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  17 (item 15) | fila: 7/8
+Produtor: produziu  45 (item 23) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  65 (item 16) | fila: 7/8
+Produtor: produziu  98 (item 24) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  23 (item 17) | fila: 7/8
+Produtor: produziu  16 (item 25) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu 100 (item 18) | fila: 7/8
+Produtor: produziu  95 (item 26) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu   2 (item 19) | fila: 7/8
+Produtor: produziu   8 (item 27) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  65 (item 20) | fila: 7/8
+Produtor: produziu  68 (item 28) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  97 (item 21) | fila: 7/8
+Produtor: produziu   1 (item 29) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  12 (item 22) | fila: 7/8
+Produtor: produziu  49 (item 30) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  45 (item 23) | fila: 7/8
+Produtor: produziu  60 (item 31) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  98 (item 24) | fila: 7/8
+Produtor: produziu  95 (item 32) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  16 (item 25) | fila: 7/8
+Produtor: produziu  37 (item 33) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  95 (item 26) | fila: 7/8
+Produtor: produziu  55 (item 34) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu   8 (item 27) | fila: 7/8
+Produtor: produziu  88 (item 35) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  68 (item 28) | fila: 7/8
+Produtor: produziu  26 (item 36) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu   1 (item 29) | fila: 7/8
+Produtor: produziu  48 (item 37) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  49 (item 30) | fila: 7/8
+Produtor: produziu  99 (item 38) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  60 (item 31) | fila: 7/8
+Produtor: produziu  28 (item 39) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  95 (item 32) | fila: 7/8
+Produtor: produziu  19 (item 40) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  37 (item 33) | fila: 7/8
+Produtor: produziu   4 (item 41) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  55 (item 34) | fila: 7/8
+Produtor: produziu  69 (item 42) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  88 (item 35) | fila: 7/8
+Produtor: produziu   3 (item 43) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  26 (item 36) | fila: 7/8
+Produtor: produziu  24 (item 44) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  48 (item 37) | fila: 7/8
+Produtor: produziu  62 (item 45) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  99 (item 38) | fila: 7/8
+Produtor: produziu  31 (item 46) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  28 (item 39) | fila: 7/8
+Produtor: produziu  66 (item 47) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  19 (item 40) | fila: 7/8
+Produtor: produziu  76 (item 48) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu   4 (item 41) | fila: 7/8
+Produtor: produziu  86 (item 49) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  69 (item 42) | fila: 7/8
+Produtor: produziu  76 (item 50) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu   3 (item 43) | fila: 7/8
+Produtor: produziu 100 (item 51) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  24 (item 44) | fila: 7/8
+Produtor: produziu  50 (item 52) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  62 (item 45) | fila: 7/8
+Produtor: produziu  53 (item 53) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  31 (item 46) | fila: 7/8
+Produtor: produziu  62 (item 54) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  66 (item 47) | fila: 7/8
+Produtor: produziu  86 (item 55) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  76 (item 48) | fila: 7/8
+Produtor: produziu  30 (item 56) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  86 (item 49) | fila: 7/8
+Produtor: produziu  63 (item 57) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  76 (item 50) | fila: 7/8
+Produtor: produziu  79 (item 58) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu 100 (item 51) | fila: 7/8
+Produtor: produziu  44 (item 59) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  50 (item 52) | fila: 7/8
+Produtor: produziu  56 (item 60) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  53 (item 53) | fila: 7/8
+Produtor: produziu  29 (item 61) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  62 (item 54) | fila: 7/8
+Produtor: produziu   2 (item 62) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  86 (item 55) | fila: 7/8
+Produtor: produziu  90 (item 63) | fila: 8/8
+Produtor: fila cheia (8/8), esperando...
+Consumidor: consumiu  30 (item 56) | fila: 7/8
+Produtor: produziu  57 (item 64) | fila: 8/8
+Consumidor: consumiu  63 (item 57) | fila: 7/8
+Consumidor: consumiu  79 (item 58) | fila: 6/8
+Consumidor: consumiu  44 (item 59) | fila: 5/8
+Consumidor: consumiu  56 (item 60) | fila: 4/8
+Consumidor: consumiu  29 (item 61) | fila: 3/8
+Consumidor: consumiu   2 (item 62) | fila: 2/8
+Consumidor: consumiu  90 (item 63) | fila: 1/8
+Consumidor: consumiu  57 (item 64) | fila: 0/8
+Fim: 64 itens produzidos e consumidos, fila final com 0 elemento(s).
+
+Verificação da saída (feita por script sobre a execução acima):
+Itens produzidos: 64
+Itens consumidos: 64
+Ordem consumida idêntica à ordem produzida: sim
+Ocupação da fila: máxima 8/8, mínima 0/8
+Vezes em que o produtor esperou por fila cheia: 47
+Vezes em que o consumidor esperou por fila vazia: 0
+
+Reflexão:
+As variáveis globais compartilhadas são o vetor fila[MAXFILA], os índices
+entra e sai e o contador tamanho. O buffer é circular: o produtor grava em
+fila[entra] e avança entra com (entra + 1) % MAXFILA; o consumidor lê de
+fila[sai] e avança sai da mesma forma, de modo que as posições do vetor são
+reaproveitadas indefinidamente e a ordem de saída é a mesma da entrada
+(FIFO), como a saída confirma.
+Para evitar condições de corrida, tudo que lê ou altera fila, entra, sai e
+tamanho acontece dentro de uma região protegida pelo mutex. Além do mutex,
+são usadas duas variáveis de condição: can_produce, em que o produtor
+espera quando a fila está cheia, e can_consume, em que o consumidor espera
+quando a fila está vazia. Depois de inserir um item, o produtor chama
+pthread_cond_signal(&can_consume); depois de retirar, o consumidor chama
+pthread_cond_signal(&can_produce). A função pthread_cond_wait() libera o
+mutex e põe a thread para dormir de forma atômica, e só retorna depois de
+readquirir o mutex, o que evita que o sinal se perca entre o teste da
+condição e o início da espera. O teste da condição é feito dentro de um
+while, e não de um if, para que a condição seja verificada de novo depois
+que a thread acorda.
+A saída mostra bem a diferença de ritmos. Como o produtor insere 1 item
+por segundo e o consumidor retira 1 a cada 2 segundos, a fila vai
+crescendo cerca de um elemento a cada 2 segundos, até chegar a 8/8 por
+volta do item 16. A partir daí o produtor passa a encontrar a fila cheia,
+imprime "fila cheia" e dorme em pthread_cond_wait() até o consumidor abrir
+uma vaga (isso aconteceu 47 vezes). O ritmo do produtor passa então a ser
+ditado pelo consumidor, que é o gargalo, e por isso a execução dura pouco
+mais de 2 minutos (63 pausas de 2 segundos). O consumidor, ao contrário,
+nunca encontrou a fila vazia depois do primeiro item. Como cada thread
+produz ou consome exatamente 64 itens, nenhuma das duas precisa de um
+valor sentinela para saber a hora de parar.
+
+
+EXERCÍCIO 4
+------------------------------------------------------------------------------
+Enunciado:
+Modifique o programa anterior, para que haja 2 (ou mais) threads
+consumidor e 2 (ou mais) threads produtor. O que muda em relação ao uso do
+mutex e da variável de condição?
+
+Código fonte (ex4_multi_produtores_consumidores.c):
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#define MAXFILA 8
+#define TOTAL 64
+#define NUM_PRODUTORES 2
+#define NUM_CONSUMIDORES 2
+
+static int fila[MAXFILA];
+static int entra = 0;
+static int sai = 0;
+static int tamanho = 0;
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t can_produce = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t can_consume = PTHREAD_COND_INITIALIZER;
+
+void *produtor(void *arg);
+void *consumidor(void *arg);
+
+int main (void)
+{
+    pthread_t tProdutores[NUM_PRODUTORES];
+    pthread_t tConsumidores[NUM_CONSUMIDORES];
+    int i;
+
+    for (i = 0; i < NUM_PRODUTORES; i++)
+        pthread_create(&tProdutores[i], NULL, produtor, (void *)(intptr_t)(i + 1));
+
+    for (i = 0; i < NUM_CONSUMIDORES; i++)
+        pthread_create(&tConsumidores[i], NULL, consumidor, (void *)(intptr_t)(i + 1));
+
+    for (i = 0; i < NUM_PRODUTORES; i++)
+        pthread_join(tProdutores[i], NULL);
+
+    for (i = 0; i < NUM_CONSUMIDORES; i++)
+        pthread_join(tConsumidores[i], NULL);
+
+    printf("Fim: %d itens produzidos e consumidos, fila final com %d elemento(s).\n", TOTAL, tamanho);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&can_produce);
+    pthread_cond_destroy(&can_consume);
+
+    return 0;
+}
+
+void *produtor(void *arg)
+{
+    int id = (int)(intptr_t) arg;
+    int cota = TOTAL / NUM_PRODUTORES;
+    unsigned int seed = (unsigned int) time(NULL) + id;
+
+    for (int i = 1; i <= cota; i++) {
+        int valor = rand_r(&seed) % 100 + 1;
+
+        pthread_mutex_lock(&mutex);
+        while (tamanho == MAXFILA) {
+            printf("Produtor %d: fila cheia (%d/%d), esperando...\n", id, tamanho, MAXFILA);
+            fflush(stdout);
+            pthread_cond_wait(&can_produce, &mutex);
+        }
+
+        fila[entra] = valor;
+        entra = (entra + 1) % MAXFILA;
+        tamanho++;
+        printf("Produtor %d: produziu %3d (item %2d de %d) | fila: %d/%d\n", id, valor, i, cota, tamanho, MAXFILA);
+        fflush(stdout);
+
+        pthread_cond_signal(&can_consume);
+        pthread_mutex_unlock(&mutex);
+
+        sleep(1);
+    }
+
+    return NULL;
+}
+
+void *consumidor(void *arg)
+{
+    int id = (int)(intptr_t) arg;
+    int cota = TOTAL / NUM_CONSUMIDORES;
+
+    for (int i = 1; i <= cota; i++) {
+        pthread_mutex_lock(&mutex);
+        while (tamanho == 0) {
+            printf("Consumidor %d: fila vazia, esperando...\n", id);
+            fflush(stdout);
+            pthread_cond_wait(&can_consume, &mutex);
+        }
+
+        int valor = fila[sai];
+        sai = (sai + 1) % MAXFILA;
+        tamanho--;
+        printf("Consumidor %d: consumiu %3d (item %2d de %d) | fila: %d/%d\n", id, valor, i, cota, tamanho, MAXFILA);
+        fflush(stdout);
+
+        pthread_cond_signal(&can_produce);
+        pthread_mutex_unlock(&mutex);
+
+        if (i < cota)
+            sleep(2);
+    }
+
+    return NULL;
+}
+
+OBS: foram usados 2 produtores e 2 consumidores. Cada produtor produz 32
+itens e cada consumidor consome 32, totalizando os mesmos 64 itens do
+exercício anterior. As constantes NUM_PRODUTORES e NUM_CONSUMIDORES podem
+ser alteradas, desde que TOTAL continue divisível por elas. Cada produtor
+usa uma semente própria no rand_r, para não compartilhar o estado do
+gerador de números aleatórios entre threads.
+
+Linha de comando para compilação e execução:
+gcc -Wall -o ex4_multi_produtores_consumidores ex4_multi_produtores_consumidores.c -lpthread
+./ex4_multi_produtores_consumidores
+
+Saída gerada (execução completa, dura pouco mais de 1 minuto):
+Produtor 1: produziu  57 (item  1 de 32) | fila: 1/8
+Produtor 2: produziu  62 (item  1 de 32) | fila: 2/8
+Consumidor 1: consumiu  57 (item  1 de 32) | fila: 1/8
+Consumidor 2: consumiu  62 (item  1 de 32) | fila: 0/8
+Produtor 2: produziu  64 (item  2 de 32) | fila: 1/8
+Produtor 1: produziu  12 (item  2 de 32) | fila: 2/8
+Produtor 1: produziu  41 (item  3 de 32) | fila: 3/8
+Consumidor 2: consumiu  64 (item  2 de 32) | fila: 2/8
+Produtor 2: produziu  67 (item  3 de 32) | fila: 3/8
+Consumidor 1: consumiu  12 (item  2 de 32) | fila: 2/8
+Produtor 2: produziu  80 (item  4 de 32) | fila: 3/8
+Produtor 1: produziu  85 (item  4 de 32) | fila: 4/8
+Consumidor 1: consumiu  41 (item  3 de 32) | fila: 3/8
+Consumidor 2: consumiu  67 (item  3 de 32) | fila: 2/8
+Produtor 1: produziu  41 (item  5 de 32) | fila: 3/8
+Produtor 2: produziu  87 (item  5 de 32) | fila: 4/8
+Produtor 1: produziu  87 (item  6 de 32) | fila: 5/8
+Produtor 2: produziu  53 (item  6 de 32) | fila: 6/8
+Consumidor 2: consumiu  80 (item  4 de 32) | fila: 5/8
+Consumidor 1: consumiu  85 (item  4 de 32) | fila: 4/8
+Produtor 2: produziu   9 (item  7 de 32) | fila: 5/8
+Produtor 1: produziu  11 (item  7 de 32) | fila: 6/8
+Produtor 1: produziu   8 (item  8 de 32) | fila: 7/8
+Produtor 2: produziu  68 (item  8 de 32) | fila: 8/8
+Consumidor 1: consumiu  41 (item  5 de 32) | fila: 7/8
+Consumidor 2: consumiu  87 (item  5 de 32) | fila: 6/8
+Produtor 2: produziu  15 (item  9 de 32) | fila: 7/8
+Produtor 1: produziu  68 (item  9 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  87 (item  6 de 32) | fila: 7/8
+Consumidor 1: consumiu  53 (item  6 de 32) | fila: 6/8
+Produtor 1: produziu  55 (item 10 de 32) | fila: 7/8
+Produtor 2: produziu  37 (item 10 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 1: consumiu   9 (item  7 de 32) | fila: 7/8
+Consumidor 2: consumiu  11 (item  7 de 32) | fila: 6/8
+Produtor 1: produziu  16 (item 11 de 32) | fila: 7/8
+Produtor 2: produziu  36 (item 11 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu   8 (item  8 de 32) | fila: 7/8
+Consumidor 1: consumiu  68 (item  8 de 32) | fila: 6/8
+Produtor 1: produziu  72 (item 12 de 32) | fila: 7/8
+Produtor 2: produziu  69 (item 12 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  15 (item  9 de 32) | fila: 7/8
+Consumidor 2: consumiu  68 (item  9 de 32) | fila: 6/8
+Produtor 1: produziu  36 (item 13 de 32) | fila: 7/8
+Produtor 2: produziu  29 (item 13 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  55 (item 10 de 32) | fila: 7/8
+Consumidor 1: consumiu  37 (item 10 de 32) | fila: 6/8
+Produtor 1: produziu  58 (item 14 de 32) | fila: 7/8
+Produtor 2: produziu  82 (item 14 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  16 (item 11 de 32) | fila: 7/8
+Consumidor 2: consumiu  36 (item 11 de 32) | fila: 6/8
+Produtor 1: produziu  63 (item 15 de 32) | fila: 7/8
+Produtor 2: produziu  48 (item 15 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  72 (item 12 de 32) | fila: 7/8
+Produtor 2: produziu  75 (item 16 de 32) | fila: 8/8
+Consumidor 1: consumiu  69 (item 12 de 32) | fila: 7/8
+Produtor 1: produziu  95 (item 16 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  36 (item 13 de 32) | fila: 7/8
+Consumidor 1: consumiu  29 (item 13 de 32) | fila: 6/8
+Produtor 1: produziu  34 (item 17 de 32) | fila: 7/8
+Produtor 2: produziu  94 (item 17 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  58 (item 14 de 32) | fila: 7/8
+Produtor 2: produziu  59 (item 18 de 32) | fila: 8/8
+Consumidor 2: consumiu  82 (item 14 de 32) | fila: 7/8
+Produtor 1: produziu  94 (item 18 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  63 (item 15 de 32) | fila: 7/8
+Consumidor 2: consumiu  48 (item 15 de 32) | fila: 6/8
+Produtor 2: produziu  36 (item 19 de 32) | fila: 7/8
+Produtor 1: produziu  80 (item 19 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  75 (item 16 de 32) | fila: 7/8
+Produtor 1: produziu  34 (item 20 de 32) | fila: 8/8
+Consumidor 1: consumiu  95 (item 16 de 32) | fila: 7/8
+Produtor 2: produziu  20 (item 20 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  34 (item 17 de 32) | fila: 7/8
+Consumidor 1: consumiu  94 (item 17 de 32) | fila: 6/8
+Produtor 1: produziu  46 (item 21 de 32) | fila: 7/8
+Produtor 2: produziu  16 (item 21 de 32) | fila: 8/8
+Produtor 2: fila cheia (8/8), esperando...
+Produtor 1: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  59 (item 18 de 32) | fila: 7/8
+Produtor 2: produziu  95 (item 22 de 32) | fila: 8/8
+Consumidor 2: consumiu  94 (item 18 de 32) | fila: 7/8
+Produtor 1: produziu  27 (item 22 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  36 (item 19 de 32) | fila: 7/8
+Consumidor 2: consumiu  80 (item 19 de 32) | fila: 6/8
+Produtor 2: produziu  57 (item 23 de 32) | fila: 7/8
+Produtor 1: produziu  63 (item 23 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  34 (item 20 de 32) | fila: 7/8
+Consumidor 1: consumiu  20 (item 20 de 32) | fila: 6/8
+Produtor 2: produziu  51 (item 24 de 32) | fila: 7/8
+Produtor 1: produziu  57 (item 24 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  46 (item 21 de 32) | fila: 7/8
+Consumidor 2: consumiu  16 (item 21 de 32) | fila: 6/8
+Produtor 2: produziu  73 (item 25 de 32) | fila: 7/8
+Produtor 1: produziu  76 (item 25 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  95 (item 22 de 32) | fila: 7/8
+Consumidor 1: consumiu  27 (item 22 de 32) | fila: 6/8
+Produtor 2: produziu  46 (item 26 de 32) | fila: 7/8
+Produtor 1: produziu   4 (item 26 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  57 (item 23 de 32) | fila: 7/8
+Consumidor 2: consumiu  63 (item 23 de 32) | fila: 6/8
+Produtor 2: produziu  47 (item 27 de 32) | fila: 7/8
+Produtor 1: produziu  76 (item 27 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  51 (item 24 de 32) | fila: 7/8
+Consumidor 1: consumiu  57 (item 24 de 32) | fila: 6/8
+Produtor 2: produziu  55 (item 28 de 32) | fila: 7/8
+Produtor 1: produziu   4 (item 28 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  73 (item 25 de 32) | fila: 7/8
+Consumidor 2: consumiu  76 (item 25 de 32) | fila: 6/8
+Produtor 2: produziu  16 (item 29 de 32) | fila: 7/8
+Produtor 1: produziu  39 (item 29 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  46 (item 26 de 32) | fila: 7/8
+Consumidor 1: consumiu   4 (item 26 de 32) | fila: 6/8
+Produtor 2: produziu  76 (item 30 de 32) | fila: 7/8
+Produtor 1: produziu  82 (item 30 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 2: consumiu  47 (item 27 de 32) | fila: 7/8
+Consumidor 1: consumiu  76 (item 27 de 32) | fila: 6/8
+Produtor 2: produziu  78 (item 31 de 32) | fila: 7/8
+Produtor 1: produziu  76 (item 31 de 32) | fila: 8/8
+Produtor 1: fila cheia (8/8), esperando...
+Produtor 2: fila cheia (8/8), esperando...
+Consumidor 1: consumiu  55 (item 28 de 32) | fila: 7/8
+Consumidor 2: consumiu   4 (item 28 de 32) | fila: 6/8
+Produtor 1: produziu  74 (item 32 de 32) | fila: 7/8
+Produtor 2: produziu  93 (item 32 de 32) | fila: 8/8
+Consumidor 2: consumiu  16 (item 29 de 32) | fila: 7/8
+Consumidor 1: consumiu  39 (item 29 de 32) | fila: 6/8
+Consumidor 1: consumiu  76 (item 30 de 32) | fila: 5/8
+Consumidor 2: consumiu  82 (item 30 de 32) | fila: 4/8
+Consumidor 2: consumiu  78 (item 31 de 32) | fila: 3/8
+Consumidor 1: consumiu  76 (item 31 de 32) | fila: 2/8
+Consumidor 1: consumiu  74 (item 32 de 32) | fila: 1/8
+Consumidor 2: consumiu  93 (item 32 de 32) | fila: 0/8
+Fim: 64 itens produzidos e consumidos, fila final com 0 elemento(s).
+
+Verificação da saída (feita por script sobre a execução acima):
+Itens produzidos: 64 (32 por produtor)
+Itens consumidos: 64 (32 por consumidor)
+Valores consumidos iguais aos produzidos (comparados como conjunto): sim
+Ocupação da fila: máxima 8/8, mínima 0/8
+Vezes em que os produtores esperaram por fila cheia: 46
+Vezes em que os consumidores esperaram por fila vazia: 0
+
+Reflexão:
+A estrutura do programa é a mesma do exercício anterior, mas agora há
+vários produtores e vários consumidores disputando a mesma fila. Como os
+produtores inserem 2 itens por segundo e os dois consumidores juntos
+retiram 1 por segundo, a fila enche em poucos segundos e a execução
+termina em pouco mais de 1 minuto (31 pausas de 2 segundos por consumidor),
+cerca da metade do tempo do exercício 3. Os valores consumidos são os
+mesmos que foram produzidos, mas, como dois produtores inserem de forma
+intercalada, não faz mais sentido comparar a sequência inteira: o que se
+verifica é o conjunto de valores, a contagem por thread e os limites da
+fila.
+Respondendo ao que muda em relação ao mutex e à variável de condição:
+(1) Mutex. No exercício 3, entra só era usado pelo produtor e sai só pelo
+consumidor; a única variável realmente compartilhada entre threads
+diferentes era tamanho. Agora dois produtores podem tentar gravar em
+fila[entra] ao mesmo tempo, e dois consumidores podem tentar ler de
+fila[sai] ao mesmo tempo. Sem exclusão mútua, dois produtores gravariam na
+mesma posição e um item se perderia, e dois consumidores leriam o mesmo
+item. Por isso o mesmo mutex passa a proteger a inserção e a retirada
+inteiras, serializando também as threads do mesmo tipo entre si, e não só
+produtor contra consumidor.
+(2) Teste da condição com while. Com várias threads esperando, o while
+deixa de ser apenas uma boa prática e passa a ser indispensável. Considere
+um consumidor C1 dormindo em pthread_cond_wait() e um produtor que insere
+um item e sinaliza. Antes de C1 readquirir o mutex, outro consumidor C2,
+que não estava dormindo, pode entrar na região crítica e retirar esse
+item. Se o teste fosse um if, C1 prosseguiria sem testar de novo e
+retiraria de uma fila vazia (tamanho ficaria -1 e o valor lido seria lixo).
+Com o while, C1 testa tamanho == 0 outra vez e volta a esperar. O mesmo
+vale para o produtor com a fila cheia, e o POSIX ainda permite acordares
+espúrios, que o while também cobre. (Este cenário é um raciocínio sobre o
+código, não foi reproduzido em teste.)
+(3) Mais de uma thread na mesma variável de condição. Agora várias
+threads podem estar dormindo ao mesmo tempo em can_produce ou em
+can_consume. pthread_cond_signal() acorda apenas uma delas, o que basta
+aqui, porque cada sinal corresponde a uma vaga ou a um item liberado.
+Isso só funciona porque foram usadas duas variáveis de condição separadas:
+produtores esperam apenas em can_produce e consumidores apenas em
+can_consume, então o sinal nunca acorda uma thread do tipo errado. Se uma
+única variável de condição fosse compartilhada pelos dois tipos, um
+signal poderia acordar, por exemplo, outro produtor, e o consumidor que
+deveria ser acordado continuaria dormindo; nesse caso seria necessário
+usar pthread_cond_broadcast(). Usar broadcast aqui também funcionaria,
+apenas de forma menos eficiente.
+(4) Término. Cada thread tem sua própria cota (TOTAL / número de threads)
+e, como o total produzido é igual ao total consumido, nenhuma thread fica
+esperando para sempre. Se as cotas não somassem o mesmo valor, alguém
+ficaria bloqueado em pthread_cond_wait() sem que ninguém o acordasse.
